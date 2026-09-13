@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.env.local
+target/
+.spectra/
+*.log
+*.tsbuildinfo
+.DS_Store

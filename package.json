@@ -1,0 +1,21 @@
+{
+  "name": "spectra",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "bun@1.2.22",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,green \"npm run dev -w @spectra/api\" \"npm run dev -w @spectra/web\"",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "check": "npm run typecheck && npm test && npm run build",
+    "crawler:test": "cargo test --manifest-path services/crawler/Cargo.toml",
+    "crawler:build": "cargo build --release --manifest-path services/crawler/Cargo.toml"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "typescript": "^5.9.2"
+  }
+}
+
