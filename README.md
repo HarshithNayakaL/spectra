@@ -101,7 +101,7 @@ bun run crawler:build
 bun run dev
 ```
 
-Open `http://localhost:5173`; the API listens on `http://localhost:8787`. With `GEMINI_API_KEY` unset, crawler and deterministic analysis remain available. `SPECTRA_ALLOW_FIXTURE_FALLBACK=true` permits the checked-in fixture demonstration only when the native crawler binary is unavailable; reports disclose the fallback.
+Open `http://localhost:5173`; the API listens on `http://localhost:8787`. With `GEMINI_API_KEY` unset, crawling and deterministic analysis remain available. If the native Rust binary is unavailable, the API automatically uses a bounded Node compatibility crawler against the live target and records that fact in the crawl warnings.
 
 Useful checks:
 
@@ -121,7 +121,6 @@ bun run build
 | `SPECTRA_API_PORT` | API listen port |
 | `SPECTRA_CRAWLER_BIN` | Native crawler executable path |
 | `SPECTRA_DATA_DIR` | Immutable local audit storage |
-| `SPECTRA_ALLOW_FIXTURE_FALLBACK` | Allow disclosed demo fallback without Rust |
 
 ## Deployment
 
@@ -140,4 +139,3 @@ V1 covers secure crawling, normalized evidence, adaptive classification, canonic
 - Robots compliance is implemented conservatively but does not replace operator review for large crawls.
 
 Next: calibrate scoring on labeled audits, add PostgreSQL migrations, enable historical comparisons, improve rendered-page evidence, then add provider comparisons and source-code repairs without changing the core contracts.
-

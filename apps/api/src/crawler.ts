@@ -1,4 +1,35 @@
-import {spawn} from "node:child_process";import {readFile} from "node:fs/promises";import {resolve} from "node:path";import {fileURLToPath} from "node:url";import {crawlOutputSchema,type CrawlOutput} from "@spectra/schemas";
-const root=resolve(fileURLToPath(new URL("../../../",import.meta.url)));
-export async function crawl(url:string):Promise<{output:CrawlOutput;fallback:boolean}>{const bin=process.env.SPECTRA_CRAWLER_BIN||resolve(root,"services/crawler/target/release/spectra-crawler");try{return {output:await run(bin,url),fallback:false}}catch(error){if(process.env.SPECTRA_ALLOW_FIXTURE_FALLBACK!=="true")throw error;const fixture=JSON.parse(await readFile(resolve(root,"fixtures/crawler/clean-portfolio.json"),"utf8"));fixture.target=url;fixture.pages[0].url=url;fixture.robots.url=new URL("/robots.txt",url).href;fixture.warnings.push("Native crawler unavailable: disclosed fixture evidence was used for local demonstration and must not be treated as a live audit.");return {output:crawlOutputSchema.parse(fixture),fallback:true}}}
-function run(bin:string,url:string){return new Promise<CrawlOutput>((ok,fail)=>{const p=spawn(bin,[url],{stdio:["ignore","pipe","pipe"],windowsHide:true}),out:Buffer[]=[],err:Buffer[]=[];const timer=setTimeout(()=>p.kill(),120000);p.stdout.on("data",d=>out.push(d));p.stderr.on("data",d=>err.push(d));p.on("error",fail);p.on("close",code=>{clearTimeout(timer);if(code)fail(new Error(Buffer.concat(err).toString()||`Crawler exited ${code}`));else{try{ok(crawlOutputSchema.parse(JSON.parse(Buffer.concat(out).toString())))}catch(e){fail(e)}}})})}
+import { spawn } from "node:child_process";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { crawlOutputSchema, type CrawlOutput } from "@spectra/schemas";
+import { crawlWithNode } from "./node-crawler";
+
+const root = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
+
+export async function crawl(url: string): Promise<{ output: CrawlOutput; fallback: boolean }> {
+  const executable = process.platform === "win32" ? "spectra-crawler.exe" : "spectra-crawler";
+  const binary = process.env.SPECTRA_CRAWLER_BIN || resolve(root, "services", "crawler", "target", "release", executable);
+  try {
+    return { output: await run(binary, url), fallback: false };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return { output: await crawlWithNode(url), fallback: false };
+  }
+}
+
+function run(binary: string, url: string): Promise<CrawlOutput> {
+  return new Promise((resolveResult, reject) => {
+    const process = spawn(binary, [url], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const output: Buffer[] = []; const errors: Buffer[] = [];
+    const timer = setTimeout(() => process.kill(), 120_000);
+    process.stdout.on("data", (chunk) => output.push(chunk));
+    process.stderr.on("data", (chunk) => errors.push(chunk));
+    process.once("error", reject);
+    process.once("close", (code) => {
+      clearTimeout(timer);
+      if (code) return reject(new Error(Buffer.concat(errors).toString() || `Crawler exited with code ${code}.`));
+      try { resolveResult(crawlOutputSchema.parse(JSON.parse(Buffer.concat(output).toString()))); }
+      catch (error) { reject(error); }
+    });
+  });
+}
