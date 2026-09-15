@@ -336,7 +336,36 @@ export class GeminiProvider implements ModelProvider {
   }
 }
 function budget(evidence: SourceEvidence[]) {
-  return JSON.stringify(evidence).slice(0, 80_000);
+  const selected: SourceEvidence[] = [];
+  const semanticPages = new Set<string>();
+  let characters = 0;
+  const prioritized = [...evidence].sort((a, b) => {
+    const rank = (item: SourceEvidence) =>
+      ["title", "description", "json_ld", "heading", "visible_text"].indexOf(
+        item.evidenceType,
+      );
+    const aRank = rank(a),
+      bRank = rank(b);
+    return (aRank < 0 ? 99 : aRank) - (bRank < 0 ? 99 : bRank);
+  });
+  for (const item of prioritized) {
+    if (item.evidenceType === "semantic_html") {
+      const pageKey = item.pageId ?? item.url;
+      if (semanticPages.has(pageKey)) continue;
+      semanticPages.add(pageKey);
+    }
+    const textLimit = ["visible_text", "semantic_html"].includes(
+      item.evidenceType,
+    )
+      ? 4_000
+      : 1_500;
+    const compact = { ...item, text: item.text.slice(0, textLimit) };
+    const size = JSON.stringify(compact).length;
+    if (characters + size > 48_000) continue;
+    selected.push(compact);
+    characters += size;
+  }
+  return JSON.stringify(selected);
 }
 function usage(data: any): Usage {
   return {
