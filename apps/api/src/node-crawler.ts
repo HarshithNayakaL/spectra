@@ -51,19 +51,22 @@ export async function crawlWithNode(target: string): Promise<CrawlOutput> {
     try {
       const response = await safeFetch(item.url, true);
       const contentType = response.headers.get("content-type") ?? "";
-      if (!contentType.toLowerCase().includes("text/html")) {
+      const normalizedContentType = contentType.toLowerCase();
+      const isMarkdown = normalizedContentType.includes("text/markdown");
+      if (
+        !normalizedContentType.includes("text/html") &&
+        !normalizedContentType.includes("application/xhtml+xml") &&
+        !isMarkdown
+      ) {
         warnings.push(
           `${item.url.href}: skipped non-HTML content (${contentType || "unknown"})`,
         );
         continue;
       }
-      const html = await readBounded(response);
-      const page = extractPage(
-        response.url,
-        response.status,
-        contentType,
-        html,
-      );
+      const body = await readBounded(response);
+      const page = isMarkdown
+        ? extractMarkdownPage(response.url, response.status, contentType, body)
+        : extractPage(response.url, response.status, contentType, body);
       const duplicate = fingerprints.get(page.fingerprint);
       if (duplicate) page.duplicateOf = duplicate;
       else fingerprints.set(page.fingerprint, page.id);
@@ -82,7 +85,9 @@ export async function crawlWithNode(target: string): Promise<CrawlOutput> {
     }
   }
   if (!pages.length)
-    throw new Error("No crawlable public HTML pages were retrieved.");
+    throw new Error(
+      "No crawlable public HTML or Markdown pages were retrieved.",
+    );
   return crawlOutputSchema.parse({
     target: root.href,
     startedAt,
@@ -111,7 +116,7 @@ async function safeFetch(initial: URL, acceptHtml: boolean): Promise<Response> {
         "user-agent":
           "SPECTRA/0.1 (+https://github.com/HarshithNayakaL/spectra)",
         accept: acceptHtml
-          ? "text/html,application/xhtml+xml"
+          ? "text/html,application/xhtml+xml,text/markdown"
           : "text/plain,*/*;q=0.1",
       },
     });
@@ -283,6 +288,61 @@ function extractPage(
     openGraph,
     twitter,
     semanticElements,
+    fingerprint,
+    contentType,
+    duplicateOf: null,
+  };
+}
+
+export function extractMarkdownPage(
+  urlValue: string,
+  status: number,
+  contentType: string,
+  markdown: string,
+): CrawlOutput["pages"][number] {
+  const url = new URL(urlValue);
+  const headings = [...markdown.matchAll(/^(#{1,6})\s+(.+)$/gm)].map(
+    (match) => ({ level: match[1].length, text: clean(match[2]) }),
+  );
+  const links = new Set<string>();
+  for (const match of markdown.matchAll(
+    /\[[^\]]*\]\(([^\s)]+)(?:\s+[^)]*)?\)/g,
+  )) {
+    try {
+      const link = new URL(match[1], url);
+      link.hash = "";
+      if (["http:", "https:"].includes(link.protocol)) links.add(link.href);
+    } catch {}
+  }
+  const paragraphs = markdown
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#") && !line.startsWith("```"))
+    .map((line) =>
+      clean(
+        line.replace(/[\*_`]/g, "").replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1"),
+      ),
+    );
+  const text = clean(
+    `${headings.map((heading) => heading.text).join(" ")} ${paragraphs.join(" ")}`,
+  ).slice(0, 100_000);
+  const fingerprint = createHash("sha256").update(text).digest("hex");
+  return {
+    id: fingerprint.slice(0, 12),
+    url: url.href,
+    status,
+    title: headings[0]?.text ?? "",
+    description: paragraphs[0] ?? "",
+    canonicalUrl: null,
+    headings,
+    text,
+    links: [...links],
+    jsonLd: [],
+    openGraph: {},
+    twitter: {},
+    semanticElements: text
+      ? [{ tag: "markdown", text: text.slice(0, 2000) }]
+      : [],
     fingerprint,
     contentType,
     duplicateOf: null,

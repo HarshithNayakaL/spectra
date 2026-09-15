@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isPublicAddress } from "./node-crawler";
+import { extractMarkdownPage, isPublicAddress } from "./node-crawler";
 
 describe("compatibility crawler network safety", () => {
   it.each([
@@ -21,4 +21,18 @@ describe("compatibility crawler network safety", () => {
     "allows public address %s",
     (address) => expect(isPublicAddress(address)).toBe(true),
   );
+});
+
+describe("Markdown page extraction", () => {
+  it("keeps headings, prose, and public links as crawl evidence", () => {
+    const page = extractMarkdownPage(
+      "https://example.com/",
+      200,
+      "text/markdown; charset=utf-8",
+      "# Ada Lovelace\n\nAI engineer and creator.\n\n## Work\n[Atlas](/atlas)",
+    );
+    expect(page.title).toBe("Ada Lovelace");
+    expect(page.text).toContain("AI engineer");
+    expect(page.links).toContain("https://example.com/atlas");
+  });
 });

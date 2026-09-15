@@ -125,7 +125,7 @@ async fn run() -> Result<()> {
         }
     }
     if pages.is_empty() {
-        bail!("no crawlable HTML pages were retrieved")
+        bail!("no crawlable HTML or Markdown pages were retrieved")
     }
     let now = timestamp();
     let output = Output {
@@ -169,7 +169,11 @@ async fn fetch_page(client: &Client, mut url: Url) -> Result<Page> {
             .and_then(|value| value.to_str().ok())
             .unwrap_or("")
             .to_string();
-        if !content_type.to_ascii_lowercase().contains("text/html") {
+        let normalized_content_type = content_type.to_ascii_lowercase();
+        if !normalized_content_type.contains("text/html")
+            && !normalized_content_type.contains("application/xhtml+xml")
+            && !normalized_content_type.contains("text/markdown")
+        {
             bail!("unsupported content type {content_type}")
         }
         if response.content_length().unwrap_or(0) as usize > MAX_BYTES {
@@ -179,12 +183,12 @@ async fn fetch_page(client: &Client, mut url: Url) -> Result<Page> {
         if bytes.len() > MAX_BYTES {
             bail!("response exceeds size limit")
         }
-        return Ok(extract::extract(
-            url,
-            status,
-            content_type,
-            &String::from_utf8_lossy(&bytes),
-        ));
+        let body = String::from_utf8_lossy(&bytes);
+        return Ok(if normalized_content_type.contains("text/markdown") {
+            extract::extract_markdown(url, status, content_type, &body)
+        } else {
+            extract::extract(url, status, content_type, &body)
+        });
     }
     bail!("redirect limit exceeded")
 }

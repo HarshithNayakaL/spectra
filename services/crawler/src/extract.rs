@@ -118,6 +118,88 @@ pub fn extract(url: Url, status: u16, content_type: String, html: &str) -> Page 
     }
 }
 
+pub fn extract_markdown(url: Url, status: u16, content_type: String, markdown: &str) -> Page {
+    let mut headings = Vec::new();
+    let mut links = Vec::new();
+    let mut paragraphs = Vec::new();
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        let hashes = trimmed
+            .chars()
+            .take_while(|character| *character == '#')
+            .count();
+        if (1..=6).contains(&hashes) && trimmed.chars().nth(hashes) == Some(' ') {
+            let text = clean(&trimmed[hashes + 1..]);
+            if !text.is_empty() {
+                headings.push(Heading {
+                    level: hashes as u8,
+                    text,
+                });
+            }
+        } else if !trimmed.is_empty() && !trimmed.starts_with("```") {
+            paragraphs.push(strip_markdown(trimmed));
+        }
+        let mut rest = trimmed;
+        while let Some(start) = rest.find("](") {
+            rest = &rest[start + 2..];
+            let Some(end) = rest.find(')') else { break };
+            let destination = rest[..end].split_whitespace().next().unwrap_or("");
+            if let Ok(link) = url.join(destination) {
+                if matches!(link.scheme(), "http" | "https") {
+                    links.push(link);
+                }
+            }
+            rest = &rest[end + 1..];
+        }
+    }
+    let title = headings
+        .first()
+        .map(|heading| heading.text.clone())
+        .unwrap_or_default();
+    let description = paragraphs.first().cloned().unwrap_or_default();
+    let text = clean(&format!(
+        "{} {}",
+        headings
+            .iter()
+            .map(|heading| heading.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" "),
+        paragraphs.join(" ")
+    ));
+    let fingerprint = hex::encode(Sha256::digest(text.as_bytes()));
+    let id = fingerprint.chars().take(12).collect();
+    Page {
+        id,
+        url,
+        status,
+        title,
+        description,
+        canonical_url: None,
+        headings,
+        text: text.clone(),
+        links,
+        json_ld: Vec::new(),
+        open_graph: BTreeMap::new(),
+        twitter: BTreeMap::new(),
+        semantic_elements: vec![SemanticElement {
+            tag: "markdown".into(),
+            text: text.chars().take(2000).collect(),
+        }],
+        fingerprint,
+        content_type,
+        duplicate_of: None,
+    }
+}
+
+fn strip_markdown(value: &str) -> String {
+    clean(
+        &value
+            .replace(['*', '_', '`'], "")
+            .replace("![", "[")
+            .replace(['[', ']'], ""),
+    )
+}
+
 fn attr<'a>(document: &'a Html, css: &str, name: &str) -> Option<&'a str> {
     Selector::parse(css)
         .ok()
@@ -152,5 +234,17 @@ mod tests {
         assert!(page.text.contains("Atlas"));
         assert_eq!(page.headings.len(), 1);
         assert_eq!(page.open_graph.get("og:title").unwrap(), "Ada");
+    }
+    #[test]
+    fn extracts_markdown_pages() {
+        let page = extract_markdown(
+            Url::parse("https://example.com/").unwrap(),
+            200,
+            "text/markdown".into(),
+            "# Ada Lovelace\n\nAI engineer and creator.\n\n## Work\n[Atlas](/atlas)",
+        );
+        assert_eq!(page.title, "Ada Lovelace");
+        assert!(page.text.contains("AI engineer"));
+        assert_eq!(page.links[0].as_str(), "https://example.com/atlas");
     }
 }
