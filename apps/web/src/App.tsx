@@ -7,20 +7,30 @@ export function App() {
     [progress, setProgress] = useState<{ stage: string; message: string }[]>(
       [],
     ),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [loadingAudit, setLoadingAudit] = useState(
+      Boolean(location.pathname.match(/^\/audits\/[a-f0-9-]{36}$/)),
+    ),
+    [running, setRunning] = useState(false);
   const id = location.pathname.match(/^\/audits\/([a-f0-9-]{36})$/)?.[1];
   useEffect(() => {
     if (id)
       fetch(`${API}/api/audits/${id}`)
         .then((r) => (r.ok ? r.json() : Promise.reject()))
         .then((x) => setAudit(auditSchema.parse(x)))
-        .catch(() => setError("This audit could not be loaded."));
+        .catch(() =>
+          setError(
+            "This audit could not be loaded. Check the link or start a new audit.",
+          ),
+        )
+        .finally(() => setLoadingAudit(false));
   }, [id]);
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError("");
     setAudit(null);
     setProgress([]);
+    setRunning(true);
     try {
       const res = await fetch(`${API}/api/audits`, {
         method: "POST",
@@ -49,6 +59,7 @@ export function App() {
             const next = auditSchema.parse(event.audit);
             setAudit(next);
             history.pushState({}, "", `/audits/${next.id}`);
+            setRunning(false);
           }
           if (event.type === "error") throw new Error(event.message);
         }
@@ -56,6 +67,7 @@ export function App() {
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Audit failed");
+      setRunning(false);
     }
   }
   return (
@@ -68,13 +80,16 @@ export function App() {
         <span className="version">ENGINE v0.1</span>
       </header>
       <main>
-        {!audit ? (
+        {loadingAudit ? (
+          <ReportSkeleton />
+        ) : !audit ? (
           <Landing
             url={url}
             setUrl={setUrl}
             submit={submit}
             progress={progress}
             error={error}
+            running={running}
           />
         ) : (
           <Report audit={audit} />
@@ -89,32 +104,43 @@ function Landing({
   submit,
   progress,
   error,
+  running,
 }: {
   url: string;
   setUrl: (x: string) => void;
   submit: (e: FormEvent) => void;
   progress: { stage: string; message: string }[];
   error: string;
+  running: boolean;
 }) {
   return (
     <section className="landing">
-      <div className="eyebrow">AI SEARCH PERCEPTION SYSTEM</div>
-      <h1>
-        See what machines
-        <br />
-        <em>actually understand.</em>
-      </h1>
-      <p className="lede">
-        SPECTRA traces important information from source code through crawling,
-        semantic interpretation, and retrieval—then shows exactly where it
-        disappears.
-      </p>
-      <form onSubmit={submit} className="analyze">
+      <div className="landingGrid">
+        <div className="landingCopy">
+          <div className="eyebrow">AI SEARCH PERCEPTION SYSTEM</div>
+          <h1>
+            See what machines
+            <br />
+            <em>actually understand.</em>
+          </h1>
+          <p className="lede">
+            Trace important information from source through retrieval. See what
+            survives, what disappears, and what to repair first.
+          </p>
+        </div>
+        <div className="landingIndex" aria-label="SPECTRA audit stages">
+          <span>01 / Crawl</span>
+          <span>02 / Interpret</span>
+          <span>03 / Retrieve</span>
+          <span>04 / Diagnose</span>
+        </div>
+      </div>
+      <form onSubmit={submit} className="analyze" aria-busy={running}>
         <label htmlFor="target">Public website URL</label>
         <div className="inputRow">
           <input
             id="target"
-            type="text"
+            type="url"
             inputMode="url"
             placeholder="example.com"
             value={url}
@@ -122,31 +148,46 @@ function Landing({
             required
             aria-describedby="url-note"
           />
-          <button
-            disabled={
-              progress.length > 0 && progress.at(-1)?.stage !== "complete"
-            }
-          >
-            Analyze site <span>→</span>
+          <button disabled={running}>
+            {running ? "Analyzing…" : "Analyze site"}{" "}
+            <span aria-hidden="true">→</span>
           </button>
         </div>
         <small id="url-note">
           Only public HTTP and HTTPS targets are accepted.
         </small>
       </form>
-      {progress.length > 0 && (
-        <div className="progress" aria-live="polite">
-          <div className="pulse" />
-          <div>
-            <b>{progress.at(-1)?.message}</b>
-            <span>{progress.length} pipeline stages recorded</span>
+      {progress.length > 0 && running && (
+        <div className="progress" aria-live="polite" aria-atomic="true">
+          <div className="progressHead">
+            <div className="pulse" aria-hidden="true" />
+            <div>
+              <b>{progress.at(-1)?.message}</b>
+              <span>{progress.length} pipeline stages recorded</span>
+            </div>
           </div>
+          <ol className="progressSteps">
+            {progress.slice(-6).map((item, index) => (
+              <li key={`${item.stage}-${index}`}>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                {item.stage.replaceAll("_", " ")}
+              </li>
+            ))}
+          </ol>
         </div>
       )}
       {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
+        <div className="error" role="alert">
+          <b>Audit stopped</b>
+          <p>{error}</p>
+          <button
+            type="button"
+            className="textButton"
+            onClick={() => document.getElementById("target")?.focus()}
+          >
+            Check the URL and try again
+          </button>
+        </div>
       )}
       <div className="principles">
         <div>
@@ -175,6 +216,9 @@ function Report({ audit }: { audit: Audit }) {
     <div className="report">
       <aside>
         <div className="auditLabel">AUDIT / {audit.id.slice(0, 8)}</div>
+        <a className="newAudit" href="/">
+          + New audit
+        </a>
         <nav aria-label="Report sections">
           {[
             "Overview",
@@ -196,6 +240,15 @@ function Report({ audit }: { audit: Audit }) {
         </nav>
       </aside>
       <article>
+        <div className="reportBar">
+          <a href={audit.target} target="_blank" rel="noreferrer">
+            {new URL(audit.target).hostname} <span aria-hidden="true">↗</span>
+          </a>
+          <span>
+            {audit.crawl?.pages.length ?? 0} pages · {audit.evidence.length}{" "}
+            evidence records
+          </span>
+        </div>
         <section id="overview" className="hero">
           <div>
             <div className="eyebrow">
@@ -203,9 +256,14 @@ function Report({ audit }: { audit: Audit }) {
               {new URL(audit.target).hostname}
             </div>
             <h1>{entity?.name || "Unresolved entity"}</h1>
-            <p>{audit.analysis?.primaryEntity.description}</p>
+            <p>
+              {audit.analysis?.primaryEntity.description ||
+                "AI identity resolution did not complete. Crawl evidence remains available below."}
+            </p>
             <div className="tags">
-              <span>{audit.analysis?.siteArchetype.replaceAll("_", " ")}</span>
+              {audit.analysis?.siteArchetype && (
+                <span>{audit.analysis.siteArchetype.replaceAll("_", " ")}</span>
+              )}
               {audit.analysis?.purpose.slice(0, 2).map((x) => (
                 <span key={x}>{x}</span>
               ))}
@@ -339,6 +397,14 @@ function Report({ audit }: { audit: Audit }) {
                 {r.subjectId} <b>— {r.predicate} →</b> {r.objectId}
               </div>
             ))}
+            {!audit.graph?.entities.length && (
+              <EmptyState
+                title="No entity graph yet"
+                body="The model did not complete semantic mapping. Source evidence is still available for inspection."
+                href="#raw-evidence"
+                action="Inspect evidence"
+              />
+            )}
           </div>
         </Section>
         <Section
@@ -374,10 +440,12 @@ function Report({ audit }: { audit: Audit }) {
                 </div>
               ))
             ) : (
-              <p className="quiet">
-                Retrieval tests require evidence-backed claims and an active
-                model provider.
-              </p>
+              <EmptyState
+                title="No retrieval results yet"
+                body="Retrieval starts after the model produces evidence-backed claims."
+                href="#raw-evidence"
+                action="Inspect source evidence"
+              />
             )}
           </div>
         </Section>
@@ -403,6 +471,14 @@ function Report({ audit }: { audit: Audit }) {
               </div>
             ))}
           </div>
+          {!audit.stability.length && (
+            <EmptyState
+              title="Stability not measured"
+              body="Question variants require a completed semantic graph and retrieval run."
+              href="#ai-understanding"
+              action="Review AI status"
+            />
+          )}
         </Section>
         <Section
           id="structured-evidence"
@@ -475,6 +551,14 @@ function Report({ audit }: { audit: Audit }) {
               </div>
             </div>
           ))}
+          {!audit.recommendations.length && (
+            <EmptyState
+              title="No repairs generated"
+              body="There are no evidence-backed repairs in this audit."
+              href="#structured-evidence"
+              action="Review measurements"
+            />
+          )}
         </Section>
         <Section id="raw-evidence" label="10 / TRACE" title="Raw evidence">
           <details>
@@ -483,6 +567,40 @@ function Report({ audit }: { audit: Audit }) {
           </details>
         </Section>
       </article>
+    </div>
+  );
+}
+
+function EmptyState({
+  title,
+  body,
+  href,
+  action,
+}: {
+  title: string;
+  body: string;
+  href: string;
+  action: string;
+}) {
+  return (
+    <div className="emptyState">
+      <b>{title}</b>
+      <p>{body}</p>
+      <a href={href}>{action} →</a>
+    </div>
+  );
+}
+
+function ReportSkeleton() {
+  return (
+    <div className="reportSkeleton" aria-live="polite" aria-busy="true">
+      <div className="skeletonSide" />
+      <div className="skeletonMain">
+        <span>Loading audit</span>
+        <div />
+        <div />
+        <div />
+      </div>
     </div>
   );
 }
@@ -512,7 +630,10 @@ function Score({ metric }: { metric: Audit["metrics"][number] | undefined }) {
     <div className="score">
       <small>EXPLAINABLE SCORE</small>
       <strong>{metric?.score ?? "—"}</strong>
-      <span>/{metric?.denominator.toFixed(1) ?? "0"} weight</span>
+      <span>
+        {metric?.earned.toFixed(1) ?? "0.0"} /{" "}
+        {metric?.denominator.toFixed(1) ?? "0.0"} weighted points
+      </span>
     </div>
   );
 }
