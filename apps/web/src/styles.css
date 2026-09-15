@@ -3,15 +3,15 @@
   color-scheme: dark;
   font-family: "Fira Sans", system-ui, sans-serif;
   font-synthesis: none;
-  --bg: oklch(0.13 0.012 155);
-  --panel: oklch(0.17 0.014 155);
-  --raised: oklch(0.21 0.015 155);
-  --line: oklch(0.29 0.018 155);
-  --line2: oklch(0.38 0.025 155);
-  --text: oklch(0.96 0.008 155);
-  --muted: oklch(0.7 0.018 155);
-  --quiet: oklch(0.55 0.018 155);
-  --accent: oklch(0.86 0.19 128);
+  --bg: oklch(0.13 0.025 260);
+  --panel: oklch(0.17 0.03 260);
+  --raised: oklch(0.21 0.035 260);
+  --line: oklch(0.3 0.035 260);
+  --line2: oklch(0.42 0.055 260);
+  --text: oklch(0.97 0.01 245);
+  --muted: oklch(0.73 0.025 245);
+  --quiet: oklch(0.57 0.03 245);
+  --accent: oklch(0.83 0.13 205);
   --danger: oklch(0.71 0.18 25);
   --warning: oklch(0.82 0.15 85);
   --mono: "Fira Code", monospace;
@@ -91,7 +91,12 @@ a {
   content: "";
   position: absolute;
   inset: 3px;
-  background: var(--accent);
+  background: linear-gradient(
+    135deg,
+    oklch(0.82 0.16 205),
+    oklch(0.72 0.18 300),
+    oklch(0.82 0.17 65)
+  );
 }
 .version,
 .eyebrow,
@@ -118,10 +123,11 @@ a {
   min-height: calc(100dvh - 64px);
   padding: clamp(52px, 8vw, 112px) clamp(20px, 7vw, 112px)
     max(48px, env(safe-area-inset-bottom));
-  background-image:
-    linear-gradient(var(--line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--line) 1px, transparent 1px);
-  background-size: 72px 72px;
+  background-image: radial-gradient(
+    circle at 48% 26%,
+    color-mix(in oklch, var(--raised) 48%, transparent),
+    transparent 64%
+  );
 }
 .landingGrid,
 .principles {
@@ -1164,4 +1170,207 @@ pre {
 }
 input {
   width: 100%;
+}
+
+/* Motion language: transitions.dev tokens */
+:root {
+  --stagger-dur: 500ms;
+  --stagger-distance: 12px;
+  --stagger-stagger: 40ms;
+  --stagger-blur: 3px;
+  --stagger-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-quick: 150ms;
+  --duration-fast: 250ms;
+  --duration-slow: 400ms;
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.t-stagger-line {
+  display: block;
+  opacity: 0;
+  transform: translateY(var(--stagger-distance));
+  filter: blur(var(--stagger-blur));
+  transition:
+    opacity var(--stagger-dur) var(--stagger-ease),
+    transform var(--stagger-dur) var(--stagger-ease),
+    filter var(--stagger-dur) var(--stagger-ease);
+  will-change: transform, opacity, filter;
+}
+.t-stagger-line--2 {
+  transition-delay: var(--stagger-stagger);
+}
+.t-stagger.is-shown .t-stagger-line {
+  opacity: 1;
+  transform: translateY(0);
+  filter: blur(0);
+}
+.t-stagger.is-hiding .t-stagger-line {
+  opacity: 0;
+  transform: translateY(0);
+  filter: blur(0);
+  transition:
+    opacity 200ms ease,
+    transform 0s linear,
+    filter 0s linear;
+  transition-delay: 0s;
+}
+
+.landing {
+  position: relative;
+  isolation: isolate;
+}
+.landing > *:not(.cloudField) {
+  position: relative;
+  z-index: 1;
+}
+.cloudField {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.62;
+  mask-image: linear-gradient(to bottom, black 0 58%, transparent 88%);
+}
+.cloudField::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at 58% 30%,
+    transparent 0 18%,
+    color-mix(in oklch, var(--accent) 5%, transparent) 46%,
+    transparent 70%
+  );
+}
+.cloudField i {
+  position: absolute;
+  width: clamp(260px, 34vw, 620px);
+  aspect-ratio: 1.7;
+  border-radius: 50%;
+  background: color-mix(in oklch, var(--accent) 8%, transparent);
+  filter: blur(70px);
+  animation: cloud-drift 18s ease-in-out infinite alternate;
+  will-change: transform;
+}
+.cloudField i:nth-child(1) {
+  top: 8%;
+  right: -8%;
+  background: color-mix(in oklch, oklch(0.66 0.16 245) 18%, transparent);
+}
+.cloudField i:nth-child(2) {
+  top: 28%;
+  right: 18%;
+  background: color-mix(in oklch, oklch(0.65 0.16 305) 12%, transparent);
+  animation-duration: 24s;
+  animation-direction: alternate-reverse;
+}
+.cloudField i:nth-child(3) {
+  top: 4%;
+  left: 34%;
+  width: clamp(180px, 24vw, 420px);
+  background: color-mix(in oklch, oklch(0.78 0.13 205) 12%, transparent);
+  animation-duration: 21s;
+}
+@keyframes cloud-drift {
+  from {
+    transform: translate3d(-3%, -2%, 0) scale(0.94);
+  }
+  to {
+    transform: translate3d(7%, 4%, 0) scale(1.08);
+  }
+}
+
+.traceReveal {
+  animation: trace-reveal var(--duration-slow) var(--ease-smooth-out) 120ms both;
+}
+@keyframes trace-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+.indexRow i::after {
+  transform-origin: left;
+  animation: signal-scan 900ms var(--ease-smooth-out) both;
+}
+.indexRow:nth-child(3) i::after {
+  animation-delay: 80ms;
+}
+.indexRow:nth-child(4) i::after {
+  animation-delay: 120ms;
+}
+.indexRow:nth-child(5) i::after {
+  animation-delay: 160ms;
+}
+@keyframes signal-scan {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+.progressHead canvas {
+  flex: 0 0 64px;
+}
+.progress {
+  animation: panel-in var(--duration-slow) var(--ease-smooth-out) both;
+}
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+    filter: blur(2px);
+  }
+}
+.record,
+.issues article,
+.metrics > div,
+.principles > div {
+  transition:
+    background-color var(--duration-fast) var(--ease-smooth-out),
+    border-color var(--duration-fast) var(--ease-smooth-out),
+    transform var(--duration-fast) var(--ease-smooth-out);
+}
+summary::before {
+  content: "+";
+  margin-right: 10px;
+  color: var(--accent);
+  transition: transform var(--duration-fast) var(--ease-smooth-out);
+}
+details[open] > summary::before {
+  transform: rotate(45deg);
+}
+button svg,
+.emptyState a svg {
+  transition: transform var(--duration-fast) var(--ease-smooth-out);
+}
+button:hover svg,
+.emptyState a:hover svg {
+  transform: translateX(3px);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .principles > div:hover,
+  .metrics > div:hover {
+    transform: translateY(-3px);
+    border-color: var(--line2);
+    background: var(--raised);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .t-stagger-line {
+    transition: none !important;
+  }
+  .cloudField i,
+  .traceReveal,
+  .indexRow i::after,
+  .progress {
+    animation: none !important;
+  }
 }

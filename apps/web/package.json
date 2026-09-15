@@ -15,6 +15,7 @@
     "@vitejs/plugin-react": "^5.0.2",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "thinking-orbs": "^0.3.1",
     "vite": "^7.1.4",
     "zod": "^4.1.5"
   },

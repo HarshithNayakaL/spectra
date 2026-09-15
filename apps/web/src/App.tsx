@@ -5,6 +5,7 @@ import {
   ArrowRight02Icon,
   ArrowUpRight01Icon,
 } from "@hugeicons/core-free-icons";
+import { ThinkingOrb } from "thinking-orbs";
 const API = import.meta.env.VITE_API_URL || "";
 export function App() {
   const [audit, setAudit] = useState<Audit | null>(null),
@@ -123,20 +124,28 @@ function Landing({
 }) {
   return (
     <section className="landing">
+      <div className="cloudField" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+      </div>
       <div className="landingGrid">
-        <div className="landingCopy">
+        <div className="landingCopy t-stagger is-shown">
           <div className="eyebrow">AI SEO AUDIT</div>
-          <h1>
+          <h1 className="t-stagger-line t-stagger-line--1">
             See how AI
             <br />
             <em>understands your site.</em>
           </h1>
-          <p className="lede">
+          <p className="lede t-stagger-line t-stagger-line--2">
             Find what AI can understand, retrieve, and trust about your brand.
             Get clear fixes backed by evidence from your website.
           </p>
         </div>
-        <div className="landingIndex" aria-label="SPECTRA audit stages">
+        <div
+          className="landingIndex traceReveal"
+          aria-label="SPECTRA audit stages"
+        >
           <div className="indexHead">
             <span>LIVE TRACE</span>
             <b>READY</b>
@@ -183,7 +192,18 @@ function Landing({
       {progress.length > 0 && running && (
         <div className="progress" aria-live="polite" aria-atomic="true">
           <div className="progressHead">
-            <div className="pulse" aria-hidden="true" />
+            <ThinkingOrb
+              state={
+                progress.length < 2
+                  ? "searching"
+                  : progress.length < 4
+                    ? "connecting"
+                    : "solving"
+              }
+              size={64}
+              theme="dark"
+              aria-label="AI analysis in progress"
+            />
             <div>
               <b>{progress.at(-1)?.message}</b>
               <span>{progress.length} pipeline stages recorded</span>
