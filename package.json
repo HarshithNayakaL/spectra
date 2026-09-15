@@ -3,19 +3,24 @@
   "private": true,
   "version": "0.1.0",
   "packageManager": "bun@1.2.22",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,green \"npm run dev -w @spectra/api\" \"npm run dev -w @spectra/web\"",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "check": "npm run typecheck && npm test && npm run build",
+    "format": "prettier --write \"apps/**/*.{ts,tsx,css,json,mjs}\" \"packages/**/*.{ts,json}\" \"*.{json,md}\" \"docs/**/*.md\"",
+    "format:check": "prettier --check \"apps/**/*.{ts,tsx,css,json,mjs}\" \"packages/**/*.{ts,json}\" \"*.{json,md}\" \"docs/**/*.md\"",
     "crawler:test": "cargo test --manifest-path services/crawler/Cargo.toml",
     "crawler:build": "cargo build --release --manifest-path services/crawler/Cargo.toml"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
+    "prettier": "^3.9.6",
     "typescript": "^5.9.2"
   }
 }
-

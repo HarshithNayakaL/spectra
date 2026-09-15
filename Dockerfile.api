@@ -1,0 +1,16 @@
+FROM rust:1.90-bookworm AS crawler
+WORKDIR /build
+COPY services/crawler ./services/crawler
+RUN cargo build --release --manifest-path services/crawler/Cargo.toml
+
+FROM oven/bun:1.2.22-debian AS runtime
+WORKDIR /app
+COPY package.json bun.lock ./
+COPY apps ./apps
+COPY packages ./packages
+RUN bun install --frozen-lockfile
+COPY --from=crawler /build/services/crawler/target/release/spectra-crawler /app/bin/spectra-crawler
+ENV NODE_ENV=production SPECTRA_CRAWLER_BIN=/app/bin/spectra-crawler SPECTRA_DATA_DIR=/data/audits SPECTRA_API_PORT=8787
+VOLUME ["/data"]
+EXPOSE 8787
+CMD ["bun", "run", "apps/api/src/index.ts"]

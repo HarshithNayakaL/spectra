@@ -101,7 +101,7 @@ bun run crawler:build
 bun run dev
 ```
 
-Open `http://localhost:5173`; the API listens on `http://localhost:8787`. With `GEMINI_API_KEY` unset, crawling and deterministic analysis remain available. If the native Rust binary is unavailable, the API automatically uses a bounded Node compatibility crawler against the live target and records that fact in the crawl warnings.
+Open `http://localhost:5173`; the API listens on `http://localhost:8787`. With `GEMINI_API_KEY` unset, live crawling and deterministic crawl measurements remain available, while semantic and retrieval evaluation is explicitly marked unavailable. If the native Rust binary is unavailable, the API automatically uses a bounded Node compatibility crawler against the live target and records that fact in the crawl warnings.
 
 Useful checks:
 
@@ -114,13 +114,15 @@ bun run build
 
 ## Environment variables
 
-| Variable | Purpose |
-| --- | --- |
-| `GEMINI_API_KEY` | Server-only Gemini API credential |
-| `GEMINI_MODEL` | Gemini model identifier |
-| `SPECTRA_API_PORT` | API listen port |
-| `SPECTRA_CRAWLER_BIN` | Native crawler executable path |
-| `SPECTRA_DATA_DIR` | Immutable local audit storage |
+| Variable                         | Purpose                                             |
+| -------------------------------- | --------------------------------------------------- |
+| `GEMINI_API_KEY`                 | Server-only Gemini API credential                   |
+| `GEMINI_MODEL`                   | Gemini model identifier                             |
+| `GEMINI_MIN_REQUEST_INTERVAL_MS` | Minimum delay between Gemini calls for quota safety |
+| `SPECTRA_API_PORT`               | API listen port                                     |
+| `SPECTRA_WEB_ORIGINS`            | Comma-separated browser origins allowed by CORS     |
+| `SPECTRA_CRAWLER_BIN`            | Native crawler executable path                      |
+| `SPECTRA_DATA_DIR`               | Immutable local audit storage                       |
 
 ## Deployment
 

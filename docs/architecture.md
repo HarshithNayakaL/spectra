@@ -23,4 +23,3 @@ The production relational model uses append-only audits. `targets` own many `aud
 ## Re-scan design
 
 Audits are immutable snapshots sharing a target identity. A later comparison aligns claims by normalized subject/predicate/object and evidence fingerprints, then shows stage changes and metric deltas without rewriting either audit.
-
