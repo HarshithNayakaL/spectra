@@ -1,5 +1,10 @@
 import { FormEvent, useEffect, useState } from "react";
 import { auditSchema, type Audit } from "@spectra/schemas";
+import { HugeiconsIcon } from "@hugeicons/react";
+import {
+  ArrowRight02Icon,
+  ArrowUpRight01Icon,
+} from "@hugeicons/core-free-icons";
 const API = import.meta.env.VITE_API_URL || "";
 export function App() {
   const [audit, setAudit] = useState<Audit | null>(null),
@@ -72,6 +77,9 @@ export function App() {
   }
   return (
     <>
+      <a className="skipLink" href="#main-content">
+        Skip to content
+      </a>
       <header className="top">
         <a href="/" className="brand" aria-label="SPECTRA home">
           <span className="mark" />
@@ -79,7 +87,7 @@ export function App() {
         </a>
         <span className="version">ENGINE v0.1</span>
       </header>
-      <main>
+      <main id="main-content">
         {loadingAudit ? (
           <ReportSkeleton />
         ) : !audit ? (
@@ -117,22 +125,38 @@ function Landing({
     <section className="landing">
       <div className="landingGrid">
         <div className="landingCopy">
-          <div className="eyebrow">AI SEARCH PERCEPTION SYSTEM</div>
+          <div className="eyebrow">AI SEO AUDIT</div>
           <h1>
-            See what machines
+            See how AI
             <br />
-            <em>actually understand.</em>
+            <em>understands your site.</em>
           </h1>
           <p className="lede">
-            Trace important information from source through retrieval. See what
-            survives, what disappears, and what to repair first.
+            Find what AI can understand, retrieve, and trust about your brand.
+            Get clear fixes backed by evidence from your website.
           </p>
         </div>
         <div className="landingIndex" aria-label="SPECTRA audit stages">
-          <span>01 / Crawl</span>
-          <span>02 / Interpret</span>
-          <span>03 / Retrieve</span>
-          <span>04 / Diagnose</span>
+          <div className="indexHead">
+            <span>LIVE TRACE</span>
+            <b>READY</b>
+          </div>
+          {[
+            "Crawl public evidence",
+            "Map entities + claims",
+            "Test direct + search",
+            "Trace failure stages",
+          ].map((stage, index) => (
+            <div className="indexRow" key={stage}>
+              <small>{String(index + 1).padStart(2, "0")}</small>
+              <span>{stage}</span>
+              <i
+                style={
+                  { "--level": `${92 - index * 13}%` } as React.CSSProperties
+                }
+              />
+            </div>
+          ))}
         </div>
       </div>
       <form onSubmit={submit} className="analyze" aria-busy={running}>
@@ -149,8 +173,7 @@ function Landing({
             aria-describedby="url-note"
           />
           <button disabled={running}>
-            {running ? "Analyzing…" : "Analyze site"}{" "}
-            <span aria-hidden="true">→</span>
+            {running ? "Analyzing…" : "Run perception audit"} <ArrowIcon />
           </button>
         </div>
         <small id="url-note">
@@ -192,18 +215,18 @@ function Landing({
       <div className="principles">
         <div>
           <b>01</b>
-          <span>Evidence first</span>
-          <p>Every conclusion traces back to source material.</p>
+          <span>See what AI sees</span>
+          <p>Check how clearly your website explains your brand.</p>
         </div>
         <div>
           <b>02</b>
-          <span>Adaptive analysis</span>
-          <p>Checks change with the site’s purpose and entity.</p>
+          <span>Find SEO gaps</span>
+          <p>Spot information AI search cannot find or trust.</p>
         </div>
         <div>
           <b>03</b>
-          <span>Explainable scores</span>
-          <p>Visible checks, weights, failures, and denominators.</p>
+          <span>Know what to fix</span>
+          <p>Get prioritized changes with evidence behind each one.</p>
         </div>
       </div>
     </section>
@@ -242,7 +265,7 @@ function Report({ audit }: { audit: Audit }) {
       <article>
         <div className="reportBar">
           <a href={audit.target} target="_blank" rel="noreferrer">
-            {new URL(audit.target).hostname} <span aria-hidden="true">↗</span>
+            {new URL(audit.target).hostname} <ExternalIcon />
           </a>
           <span>
             {audit.crawl?.pages.length ?? 0} pages · {audit.evidence.length}{" "}
@@ -267,6 +290,12 @@ function Report({ audit }: { audit: Audit }) {
               {audit.analysis?.purpose.slice(0, 2).map((x) => (
                 <span key={x}>{x}</span>
               ))}
+            </div>
+            <div className="heroStats" aria-label="Audit summary">
+              <Stat value={audit.crawl?.pages.length ?? 0} label="Pages" />
+              <Stat value={audit.evidence.length} label="Evidence" />
+              <Stat value={audit.modelRuns.length} label="AI runs" />
+              <Stat value={audit.graph?.claims.length ?? 0} label="Claims" />
             </div>
           </div>
           <Score metric={overall} />
@@ -567,6 +596,12 @@ function Report({ audit }: { audit: Audit }) {
           </details>
         </Section>
       </article>
+      <nav className="mobileNav" aria-label="Report shortcuts">
+        <a href="#overview">Overview</a>
+        <a href="#information-survival">Signals</a>
+        <a href="#raw-evidence">Evidence</a>
+        <a href="#fixes">Fixes</a>
+      </nav>
     </div>
   );
 }
@@ -586,8 +621,41 @@ function EmptyState({
     <div className="emptyState">
       <b>{title}</b>
       <p>{body}</p>
-      <a href={href}>{action} →</a>
+      <a href={href}>
+        {action} <ArrowIcon />
+      </a>
     </div>
+  );
+}
+
+function Stat({ value, label }: { value: number; label: string }) {
+  return (
+    <div>
+      <b>{value}</b>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function ArrowIcon() {
+  return (
+    <HugeiconsIcon
+      icon={ArrowRight02Icon}
+      size={18}
+      strokeWidth={1.8}
+      aria-hidden="true"
+    />
+  );
+}
+
+function ExternalIcon() {
+  return (
+    <HugeiconsIcon
+      icon={ArrowUpRight01Icon}
+      size={16}
+      strokeWidth={1.8}
+      aria-hidden="true"
+    />
   );
 }
 
@@ -626,10 +694,25 @@ function Section({
   );
 }
 function Score({ metric }: { metric: Audit["metrics"][number] | undefined }) {
+  const score = metric?.score;
+  const verdict =
+    score == null
+      ? "Pending"
+      : score >= 80
+        ? "Strong"
+        : score >= 60
+          ? "Mixed"
+          : "Weak";
   return (
     <div className="score">
-      <small>EXPLAINABLE SCORE</small>
-      <strong>{metric?.score ?? "—"}</strong>
+      <small>PERCEPTION SCORE</small>
+      <div>
+        <strong>{score ?? "—"}</strong>
+        <b>{verdict}</b>
+      </div>
+      <i aria-hidden="true">
+        <span style={{ width: `${score ?? 0}%` }} />
+      </i>
       <span>
         {metric?.earned.toFixed(1) ?? "0.0"} /{" "}
         {metric?.denominator.toFixed(1) ?? "0.0"} weighted points
