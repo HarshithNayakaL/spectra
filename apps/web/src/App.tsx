@@ -6,6 +6,7 @@ import {
   ArrowUpRight01Icon,
 } from "@hugeicons/core-free-icons";
 import { ThinkingOrb } from "thinking-orbs";
+import { BorderBeam } from "border-beam";
 const API = import.meta.env.VITE_API_URL || "";
 export function App() {
   const [audit, setAudit] = useState<Audit | null>(null),
@@ -86,7 +87,7 @@ export function App() {
           <span className="mark" />
           SPECTRA
         </a>
-        <span className="version">ENGINE v0.1</span>
+        <span className="version">AI SEO, backed by evidence</span>
       </header>
       <main id="main-content">
         {loadingAudit ? (
@@ -170,21 +171,29 @@ function Landing({
       </div>
       <form onSubmit={submit} className="analyze" aria-busy={running}>
         <label htmlFor="target">Public website URL</label>
-        <div className="inputRow">
-          <input
-            id="target"
-            type="url"
-            inputMode="url"
-            placeholder="example.com"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            required
-            aria-describedby="url-note"
-          />
-          <button disabled={running}>
-            {running ? "Analyzing…" : "Run perception audit"} <ArrowIcon />
-          </button>
-        </div>
+        <BorderBeam
+          className="inputBeam"
+          size="line"
+          colorVariant="ocean"
+          strength={0.42}
+          staticColors
+        >
+          <div className="inputRow">
+            <input
+              id="target"
+              type="url"
+              inputMode="url"
+              placeholder="example.com"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              required
+              aria-describedby="url-note"
+            />
+            <button disabled={running}>
+              {running ? "Analyzing…" : "Run perception audit"} <ArrowIcon />
+            </button>
+          </div>
+        </BorderBeam>
         <small id="url-note">
           Only public HTTP and HTTPS targets are accepted.
         </small>
