@@ -1379,3 +1379,35 @@ button:hover svg,
     animation: none !important;
   }
 }
+
+@media (width < 40rem) {
+  .landing {
+    display: flex;
+    flex-direction: column;
+  }
+  .landingGrid {
+    display: contents;
+  }
+  .landingCopy {
+    order: 1;
+  }
+  .analyze {
+    order: 2;
+    width: 100%;
+    margin-top: 32px;
+  }
+  .progress,
+  .error {
+    order: 3;
+    width: 100%;
+  }
+  .landingIndex {
+    order: 4;
+    width: 100%;
+    margin-top: 52px;
+  }
+  .principles {
+    order: 5;
+    width: 100%;
+  }
+}
