@@ -1,4 +1,5 @@
 mod extract;
+mod robots;
 mod security;
 
 use anyhow::{bail, Context, Result};
@@ -78,10 +79,11 @@ async fn run() -> Result<()> {
         .user_agent("SPECTRA/0.1 (+https://github.com/HarshithNayakaL/spectra)")
         .build()?;
     let robots_url = target.join("/robots.txt")?;
-    let robots = fetch_robots(&client, robots_url).await;
-    if !robots.allowed {
+    let (robots, rules) = fetch_robots(&client, robots_url).await;
+    if !rules.allows(&target) {
         bail!("robots.txt disallows crawling this target")
     }
+    let started_at = timestamp();
     let mut queue = VecDeque::from([(target.clone(), 0usize)]);
     let mut seen = HashSet::new();
     let mut pages = Vec::new();
@@ -90,7 +92,10 @@ async fn run() -> Result<()> {
     let mut warnings = Vec::new();
     let mut failures = Vec::new();
     while let Some((url, depth)) = queue.pop_front() {
-        if pages.len() >= MAX_PAGES || !seen.insert(url.as_str().to_owned()) {
+        if pages.len() >= MAX_PAGES {
+            break;
+        }
+        if !seen.insert(url.as_str().to_owned()) {
             continue;
         }
         match fetch_page(&client, url.clone()).await {
@@ -102,11 +107,14 @@ async fn run() -> Result<()> {
                 }
                 if depth < MAX_DEPTH {
                     for link in &page.links {
-                        if link.domain() == target.domain() {
-                            edges.push(Edge {
-                                from: url.clone(),
-                                to: link.clone(),
-                            });
+                        if link.origin() != target.origin() {
+                            continue;
+                        }
+                        edges.push(Edge {
+                            from: url.clone(),
+                            to: link.clone(),
+                        });
+                        if rules.allows(link) {
                             queue.push_back((link.clone(), depth + 1));
                         }
                     }
@@ -127,11 +135,10 @@ async fn run() -> Result<()> {
     if pages.is_empty() {
         bail!("no crawlable HTML or Markdown pages were retrieved")
     }
-    let now = timestamp();
     let output = Output {
         target,
-        started_at: now.clone(),
-        completed_at: now,
+        started_at,
+        completed_at: timestamp(),
         robots,
         pages,
         crawl_edges: edges,
@@ -192,51 +199,100 @@ async fn fetch_page(client: &Client, mut url: Url) -> Result<Page> {
     }
     bail!("redirect limit exceeded")
 }
-async fn fetch_robots(client: &Client, url: Url) -> Robots {
+async fn fetch_robots(client: &Client, url: Url) -> (Robots, robots::Rules) {
+    let empty = robots::Rules::default();
     if security::validate_public_url(url.as_str()).await.is_err() {
-        return Robots {
-            url,
-            allowed: false,
-            sitemaps: vec![],
-            status: None,
-        };
+        return (
+            Robots {
+                url,
+                allowed: false,
+                sitemaps: vec![],
+                status: None,
+            },
+            robots::Rules::blocked(),
+        );
     }
     match client.get(url.clone()).send().await {
         Ok(response) => {
             let status = response.status().as_u16();
             let body = response.text().await.unwrap_or_default();
-            let sitemaps = body
-                .lines()
-                .filter_map(|line| line.split_once(':'))
-                .filter(|(name, _)| name.trim().eq_ignore_ascii_case("sitemap"))
-                .filter_map(|(_, value)| Url::parse(value.trim()).ok())
+            let rules = robots::Rules::parse(&body);
+            let sitemaps = rules
+                .sitemaps
+                .iter()
+                .filter_map(|value| Url::parse(value).ok())
                 .collect();
-            let denied =
-                body.lines()
-                    .filter_map(|line| line.split_once(':'))
-                    .any(|(name, value)| {
-                        name.trim().eq_ignore_ascii_case("disallow") && value.trim() == "/"
-                    });
+            let allowed = rules.allows(&url);
+            (
+                Robots {
+                    url,
+                    allowed,
+                    sitemaps,
+                    status: Some(status),
+                },
+                rules,
+            )
+        }
+        Err(_) => (
             Robots {
                 url,
-                allowed: !denied,
-                sitemaps,
-                status: Some(status),
-            }
-        }
-        Err(_) => Robots {
-            url,
-            allowed: true,
-            sitemaps: vec![],
-            status: None,
-        },
+                allowed: true,
+                sitemaps: vec![],
+                status: None,
+            },
+            empty,
+        ),
     }
 }
+
+/// RFC 3339 in UTC, matching what the Node compatibility crawler emits. The
+/// previous Unix-seconds string meant Rust-crawled and Node-crawled audits
+/// carried timestamps in two different formats.
 fn timestamp() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
+    let total = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs()
-        .to_string()
+        .as_secs() as i64;
+    let (days, seconds) = (total.div_euclid(86_400), total.rem_euclid(86_400));
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        seconds / 3600,
+        (seconds % 3600) / 60,
+        seconds % 60
+    )
+}
+
+/// Howard Hinnant's days-from-civil, inverted.
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn formats_a_known_instant() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(19_723), (2024, 1, 1));
+        assert_eq!(civil_from_days(-1), (1969, 12, 31));
+    }
+    #[test]
+    fn timestamp_is_rfc3339_shaped() {
+        let value = timestamp();
+        assert_eq!(value.len(), 20);
+        assert!(value.ends_with('Z'));
+        assert_eq!(value.as_bytes()[4], b'-');
+        assert_eq!(value.as_bytes()[10], b'T');
+    }
 }

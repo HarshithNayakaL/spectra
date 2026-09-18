@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,green \"npm run dev -w @spectra/api\" \"npm run dev -w @spectra/web\"",
     "build": "bun run --cwd apps/api build && bun run --cwd apps/web build",
-    "test": "bun run --cwd apps/api test && bun run --cwd packages/evaluation test && bun run --cwd packages/scoring test",
+    "test": "bun run --cwd apps/api test && bun run --cwd packages/evaluation test && bun run --cwd packages/model-gateway test && bun run --cwd packages/scoring test",
     "typecheck": "bun run --cwd apps/api typecheck && bun run --cwd apps/web typecheck && bun run --cwd packages/evaluation typecheck && bun run --cwd packages/model-gateway typecheck && bun run --cwd packages/schemas typecheck && bun run --cwd packages/scoring typecheck",
     "check": "bun run typecheck && bun run test && bun run build",
     "format": "prettier --write \"apps/**/*.{ts,tsx,css,json,mjs}\" \"packages/**/*.{ts,json}\" \"*.{json,md}\" \"docs/**/*.md\"",

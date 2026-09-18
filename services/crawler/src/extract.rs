@@ -1,4 +1,5 @@
-use scraper::{Html, Selector};
+use scraper::node::Node;
+use scraper::{ElementRef, Html, Selector};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -66,11 +67,21 @@ pub fn extract(url: Url, status: u16, content_type: String, html: &str) -> Page 
             }
         }
     }
-    let text = Selector::parse("main,article,body")
-        .ok()
-        .and_then(|selector| document.select(&selector).next())
-        .map(|element| clean(&element.text().collect::<Vec<_>>().join(" ")))
-        .unwrap_or_default();
+    // Selecting "main,article,body" returned whichever matched first in
+    // document order -- always <body> -- and kept script, style and navigation
+    // text, so raw JS and menu chrome were sent on as the page's visible text.
+    let text = ["main", "article", "body"]
+        .iter()
+        .find_map(|css| {
+            Selector::parse(css)
+                .ok()
+                .and_then(|selector| document.select(&selector).next())
+        })
+        .map(readable_text)
+        .unwrap_or_default()
+        .chars()
+        .take(MAX_TEXT_CHARS)
+        .collect::<String>();
     let link_selector = Selector::parse("a[href]").unwrap();
     let links = document
         .select(&link_selector)
@@ -97,7 +108,7 @@ pub fn extract(url: Url, status: u16, content_type: String, html: &str) -> Page 
         }
     }
     let fingerprint = hex::encode(Sha256::digest(text.as_bytes()));
-    let id = fingerprint.chars().take(12).collect();
+    let id = page_id(&url);
     Page {
         id,
         url,
@@ -167,7 +178,7 @@ pub fn extract_markdown(url: Url, status: u16, content_type: String, markdown: &
         paragraphs.join(" ")
     ));
     let fingerprint = hex::encode(Sha256::digest(text.as_bytes()));
-    let id = fingerprint.chars().take(12).collect();
+    let id = page_id(&url);
     Page {
         id,
         url,
@@ -220,6 +231,41 @@ fn metadata(document: &Html, css: &str, key_attribute: &str) -> BTreeMap<String,
     }
     values
 }
+const MAX_TEXT_CHARS: usize = 100_000;
+const CHROME_TAGS: [&str; 7] = [
+    "script", "style", "noscript", "svg", "nav", "footer", "form",
+];
+
+/// Text of an element with page chrome skipped, in document order.
+fn readable_text(root: ElementRef) -> String {
+    let mut out = String::new();
+    // Children are pushed reversed so popping walks them front to back.
+    let mut stack: Vec<_> = root.children().rev().collect();
+    while let Some(node) = stack.pop() {
+        match node.value() {
+            Node::Element(element) if CHROME_TAGS.contains(&element.name()) => continue,
+            Node::Text(text) => {
+                out.push_str(text);
+                out.push(' ');
+            }
+            _ => {}
+        }
+        stack.extend(node.children().rev());
+    }
+    clean(&out)
+}
+
+/// Identity comes from the URL. A content hash collides across distinct pages
+/// -- every empty page hashes alike -- and evidence IDs are built as
+/// `${page.id}:${suffix}`, so colliding page IDs produced duplicate evidence
+/// IDs downstream. The body hash stays available as `fingerprint`.
+pub fn page_id(url: &Url) -> String {
+    hex::encode(Sha256::digest(url.as_str().as_bytes()))
+        .chars()
+        .take(12)
+        .collect()
+}
+
 fn clean(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -235,6 +281,69 @@ mod tests {
         assert_eq!(page.headings.len(), 1);
         assert_eq!(page.open_graph.get("og:title").unwrap(), "Ada");
     }
+    #[test]
+    fn drops_chrome_and_prefers_main_over_body() {
+        let page = extract(
+            Url::parse("https://example.com").unwrap(),
+            200,
+            "text/html".into(),
+            "<body><nav>Home Pricing</nav><script>var secret = 1;</script>\
+             <style>.a{color:red}</style><main><p>Body copy.</p></main>\
+             <footer>Copyright</footer></body>",
+        );
+        assert!(page.text.contains("Body copy."));
+        assert!(!page.text.contains("Pricing"));
+        assert!(!page.text.contains("secret"));
+        assert!(!page.text.contains("color:red"));
+        assert!(!page.text.contains("Copyright"));
+    }
+
+    #[test]
+    fn drops_chrome_when_falling_back_to_body() {
+        let page = extract(
+            Url::parse("https://example.com").unwrap(),
+            200,
+            "text/html".into(),
+            "<body><nav>Menu</nav><script>alert(1)</script><p>Only copy.</p></body>",
+        );
+        assert!(page.text.contains("Only copy."));
+        assert!(!page.text.contains("Menu"));
+        assert!(!page.text.contains("alert"));
+    }
+
+    #[test]
+    fn keeps_links_from_navigation() {
+        let page = extract(
+            Url::parse("https://example.com").unwrap(),
+            200,
+            "text/html".into(),
+            "<body><nav><a href='/pricing'>Pricing</a></nav><main>x</main></body>",
+        );
+        assert!(page
+            .links
+            .iter()
+            .any(|link| link.as_str() == "https://example.com/pricing"));
+    }
+
+    #[test]
+    fn distinct_urls_get_distinct_ids_despite_identical_text() {
+        let html = "<body><main>same</main></body>";
+        let a = extract(
+            Url::parse("https://example.com/a").unwrap(),
+            200,
+            "text/html".into(),
+            html,
+        );
+        let b = extract(
+            Url::parse("https://example.com/b").unwrap(),
+            200,
+            "text/html".into(),
+            html,
+        );
+        assert_eq!(a.fingerprint, b.fingerprint);
+        assert_ne!(a.id, b.id);
+    }
+
     #[test]
     fn extracts_markdown_pages() {
         let page = extract_markdown(

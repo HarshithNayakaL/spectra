@@ -1,5 +1,7 @@
 import { z } from "zod";
 import {
+  entitySchema,
+  relationshipSchema,
   semanticGraphSchema,
   siteAnalysisSchema,
   type SemanticGraph,
@@ -35,6 +37,8 @@ export interface ModelProvider {
   ): Promise<Result<{ correct: boolean; reason: string }>>;
 }
 export class GroundingUnavailableError extends Error {}
+/** A failure that will repeat identically on retry (bad key, bad request). */
+export class PermanentModelError extends Error {}
 
 const queryGroupsSchema = z.array(
   z.object({
@@ -48,6 +52,12 @@ const directSchema = z.object({
   reason: z.string(),
 });
 const judgmentSchema = z.object({ correct: z.boolean(), reason: z.string() });
+// The graph schema validates these as enums. Declaring them as bare strings
+// in the response schema let Gemini answer with values the parser then
+// rejected, failing the whole semantic stage after the tokens were spent.
+const ENTITY_TYPES = entitySchema.shape.type.options;
+const RELATIONSHIP_PREDICATES = relationshipSchema.shape.predicate.options;
+
 const siteResponseSchema = {
   type: "object",
   properties: {
@@ -101,7 +111,7 @@ const graphResponseSchema = {
         properties: {
           id: { type: "string" },
           name: { type: "string" },
-          type: { type: "string" },
+          type: { type: "string", enum: ENTITY_TYPES },
           description: { type: "string" },
           evidenceIds: { type: "array", items: { type: "string" } },
         },
@@ -115,7 +125,7 @@ const graphResponseSchema = {
         properties: {
           id: { type: "string" },
           subjectId: { type: "string" },
-          predicate: { type: "string" },
+          predicate: { type: "string", enum: RELATIONSHIP_PREDICATES },
           objectId: { type: "string" },
           evidenceIds: { type: "array", items: { type: "string" } },
           confidence: { type: "number" },
@@ -265,12 +275,31 @@ export class GeminiProvider implements ModelProvider {
       },
       false,
     );
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const candidate = data.candidates?.[0];
+    // Long structured answers arrive split across parts; reading only parts[0]
+    // truncated them into unparseable JSON.
+    const text = (candidate?.content?.parts ?? [])
+      .map((part: any) => part?.text ?? "")
+      .join("")
+      .trim();
+    if (!text) {
+      const reason =
+        candidate?.finishReason ?? data.promptFeedback?.blockReason;
+      throw new Error(
+        reason
+          ? `Gemini returned no content (${reason})`
+          : "Gemini returned no content",
+      );
+    }
     let parsed: unknown;
     try {
-      parsed = JSON.parse(text);
+      parsed = JSON.parse(stripJsonFence(text));
     } catch {
-      throw new Error("Gemini returned malformed JSON");
+      throw new Error(
+        candidate?.finishReason === "MAX_TOKENS"
+          ? "Gemini hit the output token limit before completing its JSON response"
+          : "Gemini returned malformed JSON",
+      );
     }
     return {
       value: schema.parse(parsed),
@@ -281,7 +310,7 @@ export class GeminiProvider implements ModelProvider {
 
   private async request(body: unknown, grounding: boolean): Promise<any> {
     let last: unknown;
-    const attempts = 5;
+    const attempts = Math.max(1, Number(process.env.GEMINI_MAX_ATTEMPTS || 6));
     for (let attempt = 0; attempt < attempts; attempt++) {
       const wait = this.nextRequestAt - Date.now();
       if (wait > 0) await delay(wait);
@@ -289,10 +318,15 @@ export class GeminiProvider implements ModelProvider {
         timer = setTimeout(() => controller.abort(), 45_000);
       try {
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent?key=${encodeURIComponent(this.key)}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`,
           {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: {
+              "content-type": "application/json",
+              // Header rather than ?key=: a key in the query string leaks into
+              // access logs, proxy caches and error reports.
+              "x-goog-api-key": this.key,
+            },
             body: JSON.stringify(body),
             signal: controller.signal,
           },
@@ -302,31 +336,38 @@ export class GeminiProvider implements ModelProvider {
             `Google Search grounding is unavailable for ${this.model} (${response.status})`,
           );
         if (response.status === 429 || response.status >= 500) {
-          const retry = Number(response.headers.get("retry-after") ?? 0);
           const detail = (await response.text())
             .slice(0, 500)
             .replace(/\s+/g, " ");
           last = new Error(
             `Gemini ${response.status}${detail ? `: ${detail}` : ""}`,
           );
+          if (attempt === attempts - 1) break;
           const backoff =
             response.status === 429
               ? Math.min(60_000, 15_000 * 2 ** attempt)
-              : 1000 * 2 ** attempt;
-          await delay(Math.max(retry * 1000, backoff));
+              : Math.min(30_000, 2_000 * 2 ** attempt);
+          await delay(Math.max(retryAfterMs(response), backoff));
           continue;
         }
         if (!response.ok) {
+          // 400/401/403 is a request or credential defect. Retrying it burns
+          // five backoff windows to arrive at the same answer.
           const detail = (await response.text()).slice(0, 300);
-          throw new Error(
+          throw new PermanentModelError(
             `Gemini request failed (${response.status}): ${detail}`,
           );
         }
         return await response.json();
       } catch (error) {
-        if (error instanceof GroundingUnavailableError) throw error;
+        if (
+          error instanceof GroundingUnavailableError ||
+          error instanceof PermanentModelError
+        )
+          throw error;
         last = error;
-        if (attempt < attempts - 1) await delay(1000 * 2 ** attempt);
+        if (attempt < attempts - 1)
+          await delay(Math.min(30_000, 2_000 * 2 ** attempt));
       } finally {
         this.nextRequestAt = Date.now() + this.minimumInterval;
         clearTimeout(timer);
@@ -334,6 +375,26 @@ export class GeminiProvider implements ModelProvider {
     }
     throw last instanceof Error ? last : new Error(String(last));
   }
+}
+
+/** Retry-After may be delta-seconds or an HTTP date; both must yield a number. */
+export function retryAfterMs(response: {
+  headers: { get(name: string): string | null };
+}): number {
+  const raw = response.headers.get("retry-after");
+  if (!raw) return 0;
+  const trimmed = raw.trim();
+  if (/^\d+$/.test(trimmed)) return Number(trimmed) * 1000;
+  const date = Date.parse(trimmed);
+  // Date.parse on a malformed value yields NaN, which used to flow through
+  // Math.max and collapse the backoff into an immediate retry.
+  return Number.isNaN(date) ? 0 : Math.max(0, date - Date.now());
+}
+
+/** Some models wrap structured output in a Markdown fence despite the MIME type. */
+export function stripJsonFence(text: string): string {
+  const fenced = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return fenced ? fenced[1] : text;
 }
 function budget(evidence: SourceEvidence[]) {
   const selected: SourceEvidence[] = [];

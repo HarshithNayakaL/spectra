@@ -19,13 +19,27 @@ export type Progress = (
   auditId: string,
 ) => void;
 
+const STAGE_PURPOSES: Record<string, string> = {
+  classifying: "site_classification",
+  mapping: "semantic_graph",
+  evaluating: "retrieval_question_generation",
+  retrieving: "retrieval",
+};
+
 export async function runAudit(
   rawTarget: string,
   progress: Progress,
 ): Promise<Audit> {
-  const target = normalizeTarget(rawTarget),
-    id = randomUUID(),
+  const id = randomUUID(),
     model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+  let target: string;
+  try {
+    target = normalizeTarget(rawTarget);
+  } catch (error) {
+    // Thrown before an audit record exists, so give the caller the reason
+    // rather than a bare "Invalid URL" from the URL constructor.
+    throw Object.assign(new Error(message(error)), { auditId: id });
+  }
   let audit: Audit = {
     id,
     target,
@@ -63,6 +77,10 @@ export async function runAudit(
     );
     const crawled = await crawl(target);
     audit.crawl = crawled.output;
+    if (crawled.fallback)
+      audit.warnings.push(
+        "The Rust crawler binary was unavailable; this audit ran on the Node compatibility crawler.",
+      );
     await stage(
       "extracting",
       `Normalizing evidence from ${audit.crawl.pages.length} crawled pages`,
@@ -299,7 +317,15 @@ export async function runAudit(
         const text = message(error);
         audit.warnings.push(`Semantic pipeline failed: ${text}`);
         audit.modelRuns.push(
-          run(model, audit.currentStage, "error", 0, false, undefined, text),
+          run(
+            model,
+            STAGE_PURPOSES[audit.currentStage] ?? "semantic_pipeline",
+            "error",
+            0,
+            false,
+            undefined,
+            text,
+          ),
         );
         log(id, audit.currentStage, { error: text });
       }
@@ -313,7 +339,6 @@ export async function runAudit(
       "diagnosing",
       "Building evidence-backed positioning issues and repairs",
     );
-    audit = evaluate(audit);
     const semanticFailed =
       !audit.analysis ||
       !audit.graph ||

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "hugeicons": {
+      "command": "npx",
+      "args": ["-y", "@hugeicons/mcp-server"]
+    }
+  }
+}

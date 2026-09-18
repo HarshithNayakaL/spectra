@@ -9,6 +9,8 @@ import type {
 } from "@spectra/schemas";
 import { scoreChecks } from "@spectra/scoring";
 
+type RetrievalMode = Audit["retrievals"][number]["mode"];
+
 const allDimensions: EvaluationContract["dimensions"][number]["id"][] = [
   "machine_accessibility",
   "semantic_extraction",
@@ -384,17 +386,19 @@ function ratio(results: Audit["retrievals"]) {
     : 0;
 }
 function buildStability(audit: Audit): Audit["stability"] {
-  const keys = new Set(
-    audit.retrievals
-      .filter((r) => r.claimId)
-      .map((r) => `${r.claimId}:${r.mode}`),
-  );
-  return [...keys].map((key) => {
-    const [claimId, mode] = key.split(":") as [
-        string,
-        "direct" | "search_grounded",
-      ],
-      items = audit.retrievals.filter(
+  // Keyed on a pair rather than a "claimId:mode" string: model-authored claim
+  // IDs may contain a colon, and splitting on the first one silently produced
+  // an unmatchable mode and an empty variant set.
+  const pairs = new Map<string, { claimId: string; mode: RetrievalMode }>();
+  for (const retrieval of audit.retrievals) {
+    if (!retrieval.claimId) continue;
+    pairs.set(`${retrieval.mode}|${retrieval.claimId}`, {
+      claimId: retrieval.claimId,
+      mode: retrieval.mode,
+    });
+  }
+  return [...pairs.values()].map(({ claimId, mode }) => {
+    const items = audit.retrievals.filter(
         (r) => r.claimId === claimId && r.mode === mode,
       ),
       measured = items.filter((r) => r.correct !== null),
