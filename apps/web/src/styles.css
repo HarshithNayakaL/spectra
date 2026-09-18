@@ -1,7 +1,7 @@
-@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@400;500;600;700&display=swap");
 :root {
   color-scheme: dark;
-  font-family: "Fira Sans", system-ui, sans-serif;
+  font-family: "Sora", system-ui, sans-serif;
   font-synthesis: none;
   --bg: oklch(0.13 0.025 260);
   --panel: oklch(0.17 0.03 260);
@@ -14,7 +14,7 @@
   --accent: oklch(0.83 0.13 205);
   --danger: oklch(0.71 0.18 25);
   --warning: oklch(0.82 0.15 85);
-  --mono: "Fira Code", monospace;
+  --mono: "IBM Plex Mono", monospace;
   --fast: 120ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
 }
@@ -215,18 +215,6 @@ a {
 .indexRow small {
   color: var(--quiet);
 }
-.indexRow i {
-  position: relative;
-  height: 3px;
-  background: var(--line);
-}
-.indexRow i:after {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: var(--level);
-  background: var(--accent);
-}
 .analyze {
   max-width: 1040px;
   margin: clamp(42px, 6vw, 72px) auto 0;
@@ -313,18 +301,6 @@ button:disabled {
   margin-top: 4px;
   color: var(--muted);
   font-size: 0.76rem;
-}
-.pulse {
-  width: 12px;
-  height: 12px;
-  background: var(--accent);
-  animation: pulse 1.4s infinite;
-}
-@keyframes pulse {
-  50% {
-    transform: scale(0.72);
-    opacity: 0.55;
-  }
 }
 .progressSteps {
   display: grid;
@@ -1234,67 +1210,6 @@ input {
   position: relative;
   isolation: isolate;
 }
-.landing > *:not(.cloudField) {
-  position: relative;
-  z-index: 1;
-}
-.cloudField {
-  position: absolute;
-  z-index: 0;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-  opacity: 0.62;
-  mask-image: linear-gradient(to bottom, black 0 58%, transparent 88%);
-}
-.cloudField::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(
-    circle at 58% 30%,
-    transparent 0 18%,
-    color-mix(in oklch, var(--accent) 5%, transparent) 46%,
-    transparent 70%
-  );
-}
-.cloudField i {
-  position: absolute;
-  width: clamp(260px, 34vw, 620px);
-  aspect-ratio: 1.7;
-  border-radius: 50%;
-  background: color-mix(in oklch, var(--accent) 8%, transparent);
-  filter: blur(70px);
-  animation: cloud-drift 18s ease-in-out infinite alternate;
-  will-change: transform;
-}
-.cloudField i:nth-child(1) {
-  top: 8%;
-  right: -8%;
-  background: color-mix(in oklch, oklch(0.66 0.16 245) 18%, transparent);
-}
-.cloudField i:nth-child(2) {
-  top: 28%;
-  right: 18%;
-  background: color-mix(in oklch, oklch(0.65 0.16 305) 12%, transparent);
-  animation-duration: 24s;
-  animation-direction: alternate-reverse;
-}
-.cloudField i:nth-child(3) {
-  top: 4%;
-  left: 34%;
-  width: clamp(180px, 24vw, 420px);
-  background: color-mix(in oklch, oklch(0.78 0.13 205) 12%, transparent);
-  animation-duration: 21s;
-}
-@keyframes cloud-drift {
-  from {
-    transform: translate3d(-3%, -2%, 0) scale(0.94);
-  }
-  to {
-    transform: translate3d(7%, 4%, 0) scale(1.08);
-  }
-}
 
 .traceReveal {
   animation: trace-reveal var(--duration-slow) var(--ease-smooth-out) 120ms both;
@@ -1309,24 +1224,6 @@ input {
     opacity: 1;
     transform: translateY(0);
     filter: blur(0);
-  }
-}
-.indexRow i::after {
-  transform-origin: left;
-  animation: signal-scan 900ms var(--ease-smooth-out) both;
-}
-.indexRow:nth-child(3) i::after {
-  animation-delay: 80ms;
-}
-.indexRow:nth-child(4) i::after {
-  animation-delay: 120ms;
-}
-.indexRow:nth-child(5) i::after {
-  animation-delay: 160ms;
-}
-@keyframes signal-scan {
-  from {
-    transform: scaleX(0);
   }
 }
 
@@ -1372,42 +1269,228 @@ button:hover svg,
   .t-stagger-line {
     transition: none !important;
   }
-  .cloudField i,
   .traceReveal,
-  .indexRow i::after,
   .progress {
     animation: none !important;
   }
 }
 
-@media (width < 40rem) {
-  .landing {
-    display: flex;
-    flex-direction: column;
-  }
+/* SPECTRA's product language: a clear action, then the evidence trail. */
+.landing {
+  min-height: calc(100dvh - 64px);
+  padding-block: clamp(46px, 6.5vw, 90px) clamp(76px, 8vw, 120px);
+  background: radial-gradient(
+    ellipse at 82% 30%,
+    color-mix(in oklch, var(--accent) 7%, var(--bg)),
+    var(--bg) 58%
+  );
+}
+.landingGrid {
+  max-width: 1400px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(310px, 0.65fr);
+  gap: clamp(36px, 5vw, 88px);
+  align-items: center;
+}
+.landing h1 {
+  max-width: 840px;
+  margin: 22px 0 24px;
+  font-size: clamp(3.35rem, 6.5vw, 6.8rem);
+  line-height: 0.99;
+  letter-spacing: -0.073em;
+}
+.landing h1 em {
+  color: var(--text);
+  font-weight: 500;
+}
+.landing .lede {
+  max-width: 52ch;
+  font-size: clamp(1rem, 1.22vw, 1.13rem);
+}
+.landingCopy .analyze {
+  width: min(100%, 760px);
+  max-width: none;
+  margin: clamp(34px, 4.5vw, 56px) 0 0;
+}
+.inputRow {
+  box-shadow: none;
+  border-radius: 5px;
+}
+.inputRow:focus-within {
+  outline: none;
+}
+.inputRow button {
+  border-radius: 3px;
+}
+.landingIndex {
+  max-width: 470px;
+  width: 100%;
+  border-color: color-mix(in oklch, var(--accent) 19%, var(--line));
+  border-radius: 10px;
+  box-shadow: 0 28px 72px color-mix(in oklch, var(--bg) 75%, transparent);
+  overflow: hidden;
+}
+.indexHead {
+  min-height: 60px;
+  padding-inline: 24px;
+  font-size: 0.73rem;
+}
+.indexHead span {
+  color: var(--text);
+}
+.indexHead b {
+  color: var(--quiet);
+  font-weight: 400;
+}
+.indexHead b::before {
+  display: none;
+}
+.indexRow {
+  grid-template-columns: 44px minmax(0, 1fr) 28px;
+  min-height: 112px;
+  gap: 16px;
+  padding: 20px 24px;
+  font-family: "Sora", system-ui, sans-serif;
+}
+.indexIcon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--accent) !important;
+  background: color-mix(in oklch, var(--accent) 11%, var(--panel));
+  border-radius: 8px;
+}
+.indexText b,
+.indexText small {
+  display: block;
+}
+.indexText b {
+  color: var(--text);
+  font-size: 0.94rem;
+  font-weight: 600;
+}
+.indexText small {
+  max-width: 36ch;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+.indexNumber {
+  align-self: start;
+  color: var(--quiet) !important;
+  font: 0.63rem var(--mono);
+}
+.indexRow:last-child {
+  border-bottom: 0;
+}
+.principles {
+  max-width: 1400px;
+  margin-top: clamp(80px, 9vw, 150px);
+}
+.principles span {
+  margin-top: 18px;
+}
+.report aside {
+  background: color-mix(in oklch, var(--panel) 78%, var(--bg));
+}
+.report nav a {
+  min-height: 41px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.report nav a:hover,
+.report nav a:focus {
+  transform: none;
+  color: var(--accent);
+}
+.hero {
+  background: radial-gradient(
+    ellipse at 85% 0%,
+    color-mix(in oklch, var(--accent) 7%, var(--bg)),
+    var(--bg) 55%
+  );
+}
+.hero::after {
+  display: none;
+}
+.hero h1 {
+  max-width: 13ch;
+}
+.section {
+  padding-block: clamp(64px, 6vw, 96px);
+}
+.section:nth-of-type(even) {
+  background: transparent;
+}
+.sectionHead {
+  margin-bottom: 36px;
+}
+.section h2 {
+  font-weight: 600;
+}
+.score {
+  border-radius: 8px;
+  box-shadow: none;
+}
+.score b {
+  max-width: 8ch;
+  line-height: 1.35;
+  text-align: right;
+}
+.scoreCaveat {
+  display: block;
+  margin-top: 12px;
+  color: var(--warning) !important;
+}
+.reportBar {
+  font-size: 0.72rem;
+}
+.hero p {
+  font-size: 1.03rem;
+}
+.metrics > div {
+  min-height: 0;
+}
+@media (width < 64rem) {
   .landingGrid {
-    display: contents;
-  }
-  .landingCopy {
-    order: 1;
-  }
-  .analyze {
-    order: 2;
-    width: 100%;
-    margin-top: 32px;
-  }
-  .progress,
-  .error {
-    order: 3;
-    width: 100%;
+    grid-template-columns: 1fr;
   }
   .landingIndex {
-    order: 4;
-    width: 100%;
-    margin-top: 52px;
+    max-width: 760px;
+  }
+}
+@media (width < 40rem) {
+  .landing {
+    padding: 38px 18px 80px;
+  }
+  .landingGrid {
+    gap: 48px;
+  }
+  .landing h1 {
+    font-size: clamp(2.8rem, 13vw, 4rem);
+    line-height: 1.03;
+  }
+  .landingCopy .analyze {
+    margin-top: 30px;
+  }
+  .landingIndex {
+    margin-top: 0;
+  }
+  .indexRow {
+    min-height: 100px;
+    padding: 16px;
+    grid-template-columns: 40px minmax(0, 1fr) 22px;
+    gap: 12px;
+  }
+  .indexIcon {
+    width: 40px;
+    height: 40px;
+  }
+  .indexText small {
+    font-size: 0.7rem;
   }
   .principles {
-    order: 5;
-    width: 100%;
+    margin-top: 80px;
   }
 }

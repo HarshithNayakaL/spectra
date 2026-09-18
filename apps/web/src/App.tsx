@@ -4,6 +4,9 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowRight02Icon,
   ArrowUpRight01Icon,
+  AiSparklesIcon,
+  Route02Icon,
+  ScanSearchIcon,
 } from "@hugeicons/core-free-icons";
 import { ThinkingOrb } from "thinking-orbs";
 import { BorderBeam } from "border-beam";
@@ -125,79 +128,91 @@ function Landing({
 }) {
   return (
     <section className="landing">
-      <div className="cloudField" aria-hidden="true">
-        <i />
-        <i />
-        <i />
-      </div>
       <div className="landingGrid">
         <div className="landingCopy t-stagger is-shown">
           <div className="eyebrow">AI SEO AUDIT</div>
           <h1 className="t-stagger-line t-stagger-line--1">
-            See how AI
+            Know how AI
             <br />
-            <em>understands your site.</em>
+            <em>sees your site.</em>
           </h1>
           <p className="lede t-stagger-line t-stagger-line--2">
-            Find what AI can understand, retrieve, and trust about your brand.
-            Get clear fixes backed by evidence from your website.
+            Find out what AI search understands about your brand, where it gets
+            confused, and what to fix first.
           </p>
+          <form onSubmit={submit} className="analyze" aria-busy={running}>
+            <label htmlFor="target">Public website URL</label>
+            <BorderBeam
+              className="inputBeam"
+              size="line"
+              colorVariant="ocean"
+              strength={0.42}
+              staticColors
+            >
+              <div className="inputRow">
+                <input
+                  id="target"
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://example.com"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  required
+                  aria-describedby="url-note"
+                />
+                <button disabled={running}>
+                  {running ? "Analyzing…" : "Analyze site"} <ArrowIcon />
+                </button>
+              </div>
+            </BorderBeam>
+            <small id="url-note">
+              Public HTTP and HTTPS sites only. No account needed.
+            </small>
+          </form>
         </div>
         <div
           className="landingIndex traceReveal"
           aria-label="SPECTRA audit stages"
         >
           <div className="indexHead">
-            <span>LIVE TRACE</span>
-            <b>READY</b>
+            <span>How the audit works</span>
+            <b>01—03</b>
           </div>
           {[
-            "Crawl public evidence",
-            "Map entities + claims",
-            "Test direct + search",
-            "Trace failure stages",
+            {
+              icon: ScanSearchIcon,
+              title: "Read your site",
+              detail: "Crawl public pages and collect source evidence.",
+            },
+            {
+              icon: AiSparklesIcon,
+              title: "Ask the model",
+              detail: "Test what Gemini understands and can retrieve.",
+            },
+            {
+              icon: Route02Icon,
+              title: "Show the gaps",
+              detail: "Trace weak claims back to a page and suggest fixes.",
+            },
           ].map((stage, index) => (
-            <div className="indexRow" key={stage}>
-              <small>{String(index + 1).padStart(2, "0")}</small>
-              <span>{stage}</span>
-              <i
-                style={
-                  { "--level": `${92 - index * 13}%` } as React.CSSProperties
-                }
-              />
+            <div className="indexRow" key={stage.title}>
+              <span className="indexIcon">
+                <HugeiconsIcon
+                  icon={stage.icon}
+                  size={22}
+                  strokeWidth={1.5}
+                  aria-hidden="true"
+                />
+              </span>
+              <span className="indexText">
+                <b>{stage.title}</b>
+                <small>{stage.detail}</small>
+              </span>
+              <span className="indexNumber">0{index + 1}</span>
             </div>
           ))}
         </div>
       </div>
-      <form onSubmit={submit} className="analyze" aria-busy={running}>
-        <label htmlFor="target">Public website URL</label>
-        <BorderBeam
-          className="inputBeam"
-          size="line"
-          colorVariant="ocean"
-          strength={0.42}
-          staticColors
-        >
-          <div className="inputRow">
-            <input
-              id="target"
-              type="url"
-              inputMode="url"
-              placeholder="example.com"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              required
-              aria-describedby="url-note"
-            />
-            <button disabled={running}>
-              {running ? "Analyzing…" : "Run perception audit"} <ArrowIcon />
-            </button>
-          </div>
-        </BorderBeam>
-        <small id="url-note">
-          Only public HTTP and HTTPS targets are accepted.
-        </small>
-      </form>
       {progress.length > 0 && running && (
         <div className="progress" aria-live="polite" aria-atomic="true">
           <div className="progressHead">
@@ -327,7 +342,7 @@ function Report({ audit }: { audit: Audit }) {
               <Stat value={audit.graph?.claims.length ?? 0} label="Claims" />
             </div>
           </div>
-          <Score metric={overall} />
+          <Score metric={overall} incomplete={audit.status !== "complete"} />
         </section>
         {audit.warnings.length > 0 && (
           <section className="notice">
@@ -722,7 +737,13 @@ function Section({
     </section>
   );
 }
-function Score({ metric }: { metric: Audit["metrics"][number] | undefined }) {
+function Score({
+  metric,
+  incomplete,
+}: {
+  metric: Audit["metrics"][number] | undefined;
+  incomplete: boolean;
+}) {
   const score = metric?.score;
   const verdict =
     score == null
@@ -737,7 +758,7 @@ function Score({ metric }: { metric: Audit["metrics"][number] | undefined }) {
       <small>PERCEPTION SCORE</small>
       <div>
         <strong>{score ?? "—"}</strong>
-        <b>{verdict}</b>
+        <b>{incomplete ? "Partial data" : verdict}</b>
       </div>
       <i aria-hidden="true">
         <span style={{ width: `${score ?? 0}%` }} />
@@ -746,6 +767,9 @@ function Score({ metric }: { metric: Audit["metrics"][number] | undefined }) {
         {metric?.earned.toFixed(1) ?? "0.0"} /{" "}
         {metric?.denominator.toFixed(1) ?? "0.0"} weighted points
       </span>
+      {incomplete && (
+        <small className="scoreCaveat">Some analysis did not finish</small>
+      )}
     </div>
   );
 }
