@@ -12,6 +12,13 @@ import {
 type Usage = { inputTokens?: number; outputTokens?: number };
 type Result<T> = { value: T; usage: Usage; durationMs: number };
 export type QueryGroup = { claimId: string; variants: string[] };
+export type IntentVerdict = {
+  answer: string;
+  metCriteria: string[];
+  unmetCriteria: string[];
+  satisfied: boolean;
+  reason: string;
+};
 export type GroundedAnswer = {
   answer: string;
   sources: Array<{ uri: string; title: string }>;
@@ -35,6 +42,16 @@ export interface ModelProvider {
     answer: string,
     claim: string,
   ): Promise<Result<{ correct: boolean; reason: string }>>;
+  deriveIntentCriteria(
+    intent: string,
+    analysis: SiteAnalysis | null,
+  ): Promise<Result<string[]>>;
+  generateIntentVariants(intent: string): Promise<Result<string[]>>;
+  attemptIntent(
+    query: string,
+    criteria: string[],
+    evidence: SourceEvidence[],
+  ): Promise<Result<IntentVerdict>>;
 }
 export class GroundingUnavailableError extends Error {}
 /** A failure that will repeat identically on retry (bad key, bad request). */
@@ -52,6 +69,44 @@ const directSchema = z.object({
   reason: z.string(),
 });
 const judgmentSchema = z.object({ correct: z.boolean(), reason: z.string() });
+const criteriaSchema = z.object({
+  criteria: z.array(z.string()).min(1).max(5),
+});
+const variantsSchema = z.object({
+  variants: z.array(z.string()).min(1).max(4),
+});
+const intentVerdictSchema = z.object({
+  answer: z.string(),
+  metCriteria: z.array(z.string()).default([]),
+  unmetCriteria: z.array(z.string()).default([]),
+  satisfied: z.boolean(),
+  reason: z.string(),
+});
+const criteriaResponseSchema = {
+  type: "object",
+  properties: {
+    criteria: { type: "array", items: { type: "string" } },
+  },
+  required: ["criteria"],
+};
+const variantsResponseSchema = {
+  type: "object",
+  properties: {
+    variants: { type: "array", items: { type: "string" } },
+  },
+  required: ["variants"],
+};
+const intentVerdictResponseSchema = {
+  type: "object",
+  properties: {
+    answer: { type: "string" },
+    metCriteria: { type: "array", items: { type: "string" } },
+    unmetCriteria: { type: "array", items: { type: "string" } },
+    satisfied: { type: "boolean" },
+    reason: { type: "string" },
+  },
+  required: ["answer", "metCriteria", "unmetCriteria", "satisfied", "reason"],
+};
 // The graph schema validates these as enums. Declaring them as bare strings
 // in the response schema let Gemini answer with values the parser then
 // rejected, failing the whole semantic stage after the tokens were spent.
@@ -217,6 +272,45 @@ export class GeminiProvider implements ModelProvider {
     return this.structured(
       `Judge whether the answer correctly supports the expected claim. Be strict about subject, relationship and object.\nQUESTION:${query}\nEXPECTED CLAIM:${claim}\nANSWER:${answer}`,
       judgmentSchema,
+    );
+  }
+
+  /**
+   * Only used when the operator declared an intent but no success criteria.
+   * Criteria must be checkable against page evidence, not opinions.
+   */
+  async deriveIntentCriteria(intent: string, analysis: SiteAnalysis | null) {
+    const result = await this.structured(
+      `A website operator wants to know whether an AI assistant can complete this job using only their website. Write 2 to 4 success criteria that decide whether the job was done. Each criterion must be a single, concrete, checkable fact the answer has to contain, such as a named price, a named page, a specific figure or a specific action. Do not write vague criteria like "is helpful" or "is accurate". Do not invent facts about the site.\nJOB: ${intent}${analysis ? `\nSITE CLASSIFICATION: ${JSON.stringify(analysis.primaryEntity)} archetype=${analysis.siteArchetype}` : ""}`,
+      criteriaSchema,
+      criteriaResponseSchema,
+    );
+    return { ...result, value: result.value.criteria };
+  }
+
+  async generateIntentVariants(intent: string) {
+    const result = await this.structured(
+      `Rewrite this request as 3 natural, semantically equivalent questions a real person would type into an AI assistant. Keep the same job. Vary the wording, not the meaning. Do not answer them.\nREQUEST: ${intent}`,
+      variantsSchema,
+      variantsResponseSchema,
+    );
+    return { ...result, value: result.value.variants };
+  }
+
+  /**
+   * Answers strictly from crawled evidence, then judges the answer against the
+   * criteria. Both halves run in one call so the verdict cannot drift from the
+   * answer it is judging.
+   */
+  async attemptIntent(
+    query: string,
+    criteria: string[],
+    evidence: SourceEvidence[],
+  ) {
+    return this.structured(
+      `Act as an AI assistant that may only use the supplied website evidence. First answer the question from that evidence alone. Then check the answer against each success criterion and sort every criterion verbatim into metCriteria or unmetCriteria. Set satisfied=true only when every criterion is met. If the evidence does not support an answer, say so plainly and mark the criteria unmet. Never use outside knowledge about this organisation.\nQUESTION: ${query}\nSUCCESS CRITERIA: ${JSON.stringify(criteria)}\nEVIDENCE: ${budget(evidence)}`,
+      intentVerdictSchema,
+      intentVerdictResponseSchema,
     );
   }
 

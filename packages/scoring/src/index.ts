@@ -2,6 +2,11 @@ import type { Check, Metric } from "@spectra/schemas";
 
 export const SCORING_VERSION = "spectra-v0.1" as const;
 export const dimensionRegistry = {
+  intent_completion: {
+    label: "Intent Completion",
+    requiredInputs: ["intents", "retrievals"],
+    limitations: ["Measured only against the intents supplied for this audit"],
+  },
   machine_accessibility: {
     label: "Machine Accessibility",
     requiredInputs: ["crawl"],

@@ -153,6 +153,7 @@ export const semanticGraphSchema = z.object({
   ambiguities: z.array(z.string()).default([]),
 });
 export const dimensionIdSchema = z.enum([
+  "intent_completion",
   "machine_accessibility",
   "semantic_extraction",
   "entity_clarity",
@@ -197,6 +198,57 @@ export const survivalSchema = z.object({
   failedAt: z.string().nullable(),
   survivalRate: z.number().min(0).max(1).default(0),
 });
+export const intentStageSchema = z.object({
+  stage: z.enum([
+    "source",
+    "crawler",
+    "extraction",
+    "semantic_graph",
+    "model_understanding",
+    "retrieval",
+  ]),
+  status: z.enum(["survived", "failed", "not_tested"]),
+  note: z.string().default(""),
+});
+
+/**
+ * A job someone hires the site to do. Declared intents come from the operator
+ * and are the thing being measured; model intents are inferred from the site
+ * and are used only when nothing was declared.
+ */
+export const intentSchema = z.object({
+  id: z.string(),
+  text: z.string().min(1).max(280),
+  source: z.enum(["declared", "model"]).default("model"),
+  successCriteria: z.array(z.string()).default([]),
+  criteriaSource: z.enum(["declared", "model"]).default("model"),
+  variants: z.array(z.string()).default([]),
+  outcome: z
+    .enum(["satisfied", "partial", "unsatisfied", "not_run", "error"])
+    .default("not_run"),
+  answer: z.string().nullable().default(null),
+  reason: z.string().default(""),
+  metCriteria: z.array(z.string()).default([]),
+  unmetCriteria: z.array(z.string()).default([]),
+  variantsSatisfied: z.number().int().default(0),
+  variantsMeasured: z.number().int().default(0),
+  evidenceIds: z.array(z.string()).default([]),
+  retrievalIds: z.array(z.string()).default([]),
+  stages: z.array(intentStageSchema).default([]),
+  failedAt: z.string().nullable().default(null),
+  error: z.string().optional(),
+  durationMs: z.number().default(0),
+});
+
+/** What the caller asked us to measure, preserved so a rerun is comparable. */
+export const intentRequestSchema = z.object({
+  text: z.string().trim().min(3).max(280),
+  successCriteria: z
+    .array(z.string().trim().min(1).max(200))
+    .max(6)
+    .default([]),
+});
+
 export const checkSchema = z.object({
   id: z.string(),
   dimension: dimensionIdSchema,
@@ -225,6 +277,7 @@ export const groundingSourceSchema = z.object({
 export const retrievalSchema = z.object({
   id: z.string(),
   claimId: z.string().optional(),
+  intentId: z.string().optional(),
   query: z.string(),
   variantIndex: z.number().int().default(0),
   mode: z.enum(["direct", "search_grounded"]),
@@ -261,6 +314,29 @@ export const issueSchema = z.object({
   recommendedFix: z.string(),
   confidence: z.number().min(0).max(1),
 });
+/**
+ * A fix an operator can hand to a coding agent. `scoreImpact` is exact rather
+ * than estimated: scoring is deterministic, so the recoverable points are
+ * computed by replaying the score with the blocked checks passing.
+ */
+export const recommendationSchema = z.object({
+  id: z.string(),
+  issueId: z.string(),
+  whatFailed: z.string(),
+  where: z.string(),
+  evidenceIds: z.array(z.string()),
+  change: z.string(),
+  rationale: z.string(),
+  severity: z.enum(["low", "medium", "high", "critical"]).default("medium"),
+  dimension: dimensionIdSchema.nullable().default(null),
+  checkIds: z.array(z.string()).default([]),
+  scoreImpact: z.number().default(0),
+  missingFacts: z.array(z.string()).default([]),
+  pageUrls: z.array(z.string()).default([]),
+  steps: z.array(z.string()).default([]),
+  verify: z.string().default(""),
+});
+
 export const modelRunSchema = z.object({
   id: z.string(),
   provider: z.string(),
@@ -287,6 +363,7 @@ export const auditSchema = z.object({
     "mapping",
     "evaluating",
     "retrieving",
+    "intents",
     "scoring",
     "diagnosing",
     "complete",
@@ -297,27 +374,19 @@ export const auditSchema = z.object({
   createdAt: z.string(),
   completedAt: z.string().nullable(),
   scoringVersion: z.literal("spectra-v0.1"),
+  model: z.string().default(""),
   crawl: crawlOutputSchema.nullable(),
   evidence: z.array(evidenceSchema),
   analysis: siteAnalysisSchema.nullable(),
   graph: semanticGraphSchema.nullable(),
   contract: contractSchema.nullable(),
+  intents: z.array(intentSchema).default([]),
   survival: z.array(survivalSchema),
   stability: z.array(stabilitySchema).default([]),
   retrievals: z.array(retrievalSchema),
   metrics: z.array(metricSchema),
   issues: z.array(issueSchema),
-  recommendations: z.array(
-    z.object({
-      id: z.string(),
-      issueId: z.string(),
-      whatFailed: z.string(),
-      where: z.string(),
-      evidenceIds: z.array(z.string()),
-      change: z.string(),
-      rationale: z.string(),
-    }),
-  ),
+  recommendations: z.array(recommendationSchema),
   modelRuns: z.array(modelRunSchema),
   warnings: z.array(z.string()),
 });
@@ -331,4 +400,7 @@ export type EvaluationContract = z.infer<typeof contractSchema>;
 export type Check = z.infer<typeof checkSchema>;
 export type Metric = z.infer<typeof metricSchema>;
 export type RetrievalResult = z.infer<typeof retrievalSchema>;
+export type Intent = z.infer<typeof intentSchema>;
+export type IntentRequest = z.infer<typeof intentRequestSchema>;
 export type ModelRun = z.infer<typeof modelRunSchema>;
+export type Recommendation = z.infer<typeof recommendationSchema>;

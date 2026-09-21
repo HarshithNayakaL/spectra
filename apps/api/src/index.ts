@@ -3,6 +3,13 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
+import { intentRequestSchema } from "@spectra/schemas";
+import {
+  DEFAULT_MODEL,
+  FALLBACK_MODELS,
+  isValidModelId,
+  listModels,
+} from "./models";
 import { runAudit } from "./pipeline";
 import { getAudit } from "./store";
 
@@ -36,15 +43,51 @@ app.get("/api/health", (c) =>
     runningAudits: running,
   }),
 );
+/**
+ * The live Gemini catalogue, filtered to models that answer in text. Read from
+ * Google at request time so a model released after this deploy is selectable
+ * without shipping new code.
+ */
+app.get("/api/models", async (c) => {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key)
+    return c.json({ models: FALLBACK_MODELS, source: "fallback" as const });
+  try {
+    const models = await listModels(key);
+    return c.json({
+      models: models.length ? models : FALLBACK_MODELS,
+      source: models.length ? ("live" as const) : ("fallback" as const),
+    });
+  } catch {
+    return c.json({ models: FALLBACK_MODELS, source: "fallback" as const });
+  }
+});
 app.get("/api/audits/:id", async (c) => {
   const audit = await getAudit(c.req.param("id"));
   return audit ? c.json(audit) : c.json({ error: "Audit not found" }, 404);
 });
 app.post("/api/audits", async (c) => {
   const parsed = z
-    .object({ url: z.string().min(1).max(2048) })
+    .object({
+      url: z.string().min(1).max(2048),
+      // Up to five jobs the operator wants an agent to be able to finish.
+      intents: z.array(intentRequestSchema).max(5).default([]),
+      model: z
+        .string()
+        .refine(isValidModelId, "Unrecognised model id")
+        .default(DEFAULT_MODEL),
+    })
     .safeParse(await c.req.json().catch(() => null));
-  if (!parsed.success) return c.json({ error: "A URL is required" }, 400);
+  if (!parsed.success)
+    return c.json(
+      {
+        error:
+          parsed.error.issues[0]?.path[0] === "intents"
+            ? "Each intent needs 3 to 280 characters, with at most 6 success criteria."
+            : "A URL is required",
+      },
+      400,
+    );
   const target = readableTarget(parsed.data.url);
   // Reject an unusable URL with a status code instead of opening a stream
   // whose only content is an error frame.
@@ -74,7 +117,15 @@ app.post("/api/audits", async (c) => {
       const send = (stage: string, message: string, auditId: string) =>
         write({ type: "progress", stage, message, auditId });
       try {
-        write({ type: "result", audit: await runAudit(target.value, send) });
+        write({
+          type: "result",
+          audit: await runAudit(
+            target.value,
+            send,
+            parsed.data.intents,
+            parsed.data.model,
+          ),
+        });
       } catch (error) {
         write({
           type: "error",

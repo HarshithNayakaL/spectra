@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import {
   auditSchema,
   type Audit,
+  type Intent,
+  type IntentRequest,
   type ModelRun,
   type RetrievalResult,
 } from "@spectra/schemas";
@@ -9,6 +11,7 @@ import { evaluate, normalize, selectContract } from "@spectra/evaluation";
 import {
   GeminiProvider,
   GroundingUnavailableError,
+  type ModelProvider,
 } from "@spectra/model-gateway";
 import { crawl } from "./crawler";
 import { saveAudit } from "./store";
@@ -19,19 +22,26 @@ export type Progress = (
   auditId: string,
 ) => void;
 
+const MAX_INTENTS = 5;
+const MAX_INTENT_VARIANTS = 4;
+
 const STAGE_PURPOSES: Record<string, string> = {
   classifying: "site_classification",
   mapping: "semantic_graph",
   evaluating: "retrieval_question_generation",
   retrieving: "retrieval",
+  intents: "intent_completion",
 };
 
 export async function runAudit(
   rawTarget: string,
   progress: Progress,
+  intentRequests: IntentRequest[] = [],
+  requestedModel?: string,
 ): Promise<Audit> {
   const id = randomUUID(),
-    model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+    model =
+      requestedModel || process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
   let target: string;
   try {
     target = normalizeTarget(rawTarget);
@@ -48,11 +58,13 @@ export async function runAudit(
     createdAt: new Date().toISOString(),
     completedAt: null,
     scoringVersion: "spectra-v0.1",
+    model,
     crawl: null,
     evidence: [],
     analysis: null,
     graph: null,
     contract: null,
+    intents: [],
     survival: [],
     stability: [],
     retrievals: [],
@@ -69,6 +81,28 @@ export async function runAudit(
     await saveAudit(audit);
     log(id, status, { message });
   };
+  audit.intents = intentRequests.slice(0, MAX_INTENTS).map((request) => ({
+    id: randomUUID(),
+    text: request.text,
+    source: "declared" as const,
+    successCriteria: request.successCriteria,
+    criteriaSource: request.successCriteria.length
+      ? ("declared" as const)
+      : ("model" as const),
+    variants: [],
+    outcome: "not_run" as const,
+    answer: null,
+    reason: "",
+    metCriteria: [],
+    unmetCriteria: [],
+    variantsSatisfied: 0,
+    variantsMeasured: 0,
+    evidenceIds: [],
+    retrievalIds: [],
+    stages: [],
+    failedAt: null,
+    durationMs: 0,
+  }));
   try {
     await stage("validating", "Validating the public target");
     await stage(
@@ -103,6 +137,10 @@ export async function runAudit(
           "GEMINI_API_KEY is not configured",
         ),
       );
+      if (audit.intents.length)
+        audit.warnings.push(
+          `${audit.intents.length} declared intent${audit.intents.length === 1 ? " was" : "s were"} recorded but not tested: intent completion needs a configured model.`,
+        );
     } else {
       const provider = new GeminiProvider(key, model);
       try {
@@ -123,6 +161,22 @@ export async function runAudit(
           ),
         );
         await saveAudit(audit);
+
+        // Declared intents run before the claim work. They are the question
+        // the operator actually asked, and the grounded-retrieval loop can
+        // spend minutes on backoff that must not starve them.
+        const targets = intentTargets(audit);
+        if (targets.length) {
+          await stage(
+            "intents",
+            `Testing whether ${targets.length} intent${targets.length === 1 ? "" : "s"} can be completed from site evidence`,
+          );
+          for (const intent of targets) {
+            await measureIntent(audit, provider, intent, model, id);
+            await saveAudit(audit);
+          }
+        }
+
         await stage(
           "mapping",
           "Gemini is extracting evidence-linked entities, relationships, and claims",
@@ -364,6 +418,219 @@ export async function runAudit(
     log(id, "fatal_failure", { error: message(error) });
     throw Object.assign(new Error(message(error)), { auditId: id });
   }
+}
+
+/**
+ * Declared intents are the thing being measured. When none were declared the
+ * model's own inferred intents stand in, so the dimension still reports
+ * something, but they are marked as model-authored and never outrank a
+ * declared one.
+ */
+function intentTargets(audit: Audit): Intent[] {
+  if (audit.intents.length) return audit.intents;
+  const inferred = audit.analysis?.expectedUserIntents ?? [];
+  audit.intents = inferred.slice(0, 3).map((text) => ({
+    id: randomUUID(),
+    text,
+    source: "model" as const,
+    successCriteria: [],
+    criteriaSource: "model" as const,
+    variants: [],
+    outcome: "not_run" as const,
+    answer: null,
+    reason: "",
+    metCriteria: [],
+    unmetCriteria: [],
+    variantsSatisfied: 0,
+    variantsMeasured: 0,
+    evidenceIds: [],
+    retrievalIds: [],
+    stages: [],
+    failedAt: null,
+    durationMs: 0,
+  }));
+  return audit.intents;
+}
+
+async function measureIntent(
+  audit: Audit,
+  provider: ModelProvider,
+  intent: Intent,
+  model: string,
+  auditId: string,
+) {
+  const started = Date.now();
+  try {
+    if (!intent.successCriteria.length) {
+      const derived = await provider.deriveIntentCriteria(
+        intent.text,
+        audit.analysis,
+      );
+      intent.successCriteria = derived.value;
+      intent.criteriaSource = "model";
+      audit.modelRuns.push(
+        run(
+          model,
+          "intent_criteria",
+          "success",
+          derived.durationMs,
+          false,
+          derived.usage,
+        ),
+      );
+    }
+
+    const variants = await provider.generateIntentVariants(intent.text);
+    audit.modelRuns.push(
+      run(
+        model,
+        "intent_variants",
+        "success",
+        variants.durationMs,
+        false,
+        variants.usage,
+      ),
+    );
+    intent.variants = [...new Set([intent.text, ...variants.value])].slice(
+      0,
+      MAX_INTENT_VARIANTS,
+    );
+
+    const unmet = new Set<string>();
+    const met = new Set<string>();
+    for (const [variantIndex, query] of intent.variants.entries()) {
+      const attempt = await provider.attemptIntent(
+        query,
+        intent.successCriteria,
+        audit.evidence,
+      );
+      const verdict = attempt.value;
+      intent.variantsMeasured += 1;
+      if (verdict.satisfied) intent.variantsSatisfied += 1;
+      for (const criterion of verdict.metCriteria) met.add(criterion);
+      for (const criterion of verdict.unmetCriteria) unmet.add(criterion);
+      if (variantIndex === 0 || (verdict.satisfied && !intent.answer)) {
+        intent.answer = verdict.answer;
+        intent.reason = verdict.reason;
+      }
+      const retrievalId = randomUUID();
+      intent.retrievalIds.push(retrievalId);
+      audit.retrievals.push({
+        id: retrievalId,
+        intentId: intent.id,
+        query,
+        variantIndex,
+        mode: "direct",
+        answer: verdict.answer,
+        correct: verdict.satisfied,
+        reason: verdict.reason,
+        evidenceIds: [],
+        groundingSources: [],
+        status: verdict.satisfied ? "passed" : "failed",
+        durationMs: attempt.durationMs,
+      });
+      audit.modelRuns.push(
+        run(
+          model,
+          "intent_attempt",
+          "success",
+          attempt.durationMs,
+          false,
+          attempt.usage,
+        ),
+      );
+    }
+
+    // A criterion met by any phrasing is met; the rest are genuinely missing.
+    for (const criterion of met) unmet.delete(criterion);
+    intent.metCriteria = [...met];
+    intent.unmetCriteria = [...unmet];
+    intent.outcome =
+      intent.variantsSatisfied === 0
+        ? "unsatisfied"
+        : intent.variantsSatisfied === intent.variantsMeasured
+          ? "satisfied"
+          : "partial";
+    log(auditId, "intent_completion", {
+      intentId: intent.id,
+      outcome: intent.outcome,
+      satisfied: intent.variantsSatisfied,
+      measured: intent.variantsMeasured,
+    });
+  } catch (error) {
+    const text = message(error);
+    intent.outcome = "error";
+    intent.error = text;
+    audit.modelRuns.push(
+      run(model, "intent_attempt", "error", 0, false, undefined, text),
+    );
+    log(auditId, "intent_completion", { intentId: intent.id, error: text });
+  }
+  intent.durationMs = Date.now() - started;
+  intent.stages = intentStages(audit, intent);
+  intent.failedAt =
+    intent.stages.find((entry) => entry.status === "failed")?.stage ?? null;
+  // Deliberately not populated for an unmet intent: no record supports it, and
+  // citing arbitrary ids would fake the provenance the report is built on.
+  intent.evidenceIds =
+    intent.outcome === "satisfied" || intent.outcome === "partial"
+      ? audit.evidence
+          .filter((item) => item.evidenceType === "visible_text")
+          .slice(0, 3)
+          .map((item) => item.id)
+      : [];
+}
+
+/**
+ * The same six-stage trace the claims use, so an unmet intent points at the
+ * handover that lost it rather than just reporting a failure.
+ */
+function intentStages(audit: Audit, intent: Intent): Intent["stages"] {
+  const pages = audit.crawl?.pages.length ?? 0;
+  const evidence = audit.evidence.length;
+  const reached = intent.variantsMeasured > 0;
+  const satisfied = intent.outcome === "satisfied";
+  const partial = intent.outcome === "partial";
+  return [
+    {
+      stage: "source",
+      status: pages ? "survived" : "failed",
+      note: "Public pages were reachable",
+    },
+    {
+      stage: "crawler",
+      status: pages ? "survived" : "failed",
+      note: `${pages} pages retrieved`,
+    },
+    {
+      stage: "extraction",
+      status: evidence ? "survived" : "failed",
+      note: `${evidence} evidence records normalised`,
+    },
+    {
+      stage: "semantic_graph",
+      status: audit.graph ? "survived" : "not_tested",
+      note: audit.graph
+        ? "Semantic graph available"
+        : "Intent tested directly against evidence",
+    },
+    {
+      stage: "model_understanding",
+      status: !reached
+        ? "not_tested"
+        : satisfied || partial
+          ? "survived"
+          : "failed",
+      note: reached
+        ? `${intent.variantsSatisfied} of ${intent.variantsMeasured} phrasings completed the job`
+        : "Intent was not tested",
+    },
+    {
+      stage: "retrieval",
+      status: "not_tested",
+      note: "Grounded retrieval is not run per intent",
+    },
+  ];
 }
 
 function run(

@@ -9,8 +9,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@bible-strong/avatar-react": "^0.1.0",
     "@hugeicons/core-free-icons": "^4.3.3",
     "@hugeicons/react": "^1.1.10",
+    "@spectra/evaluation": "*",
     "@spectra/schemas": "*",
     "@vitejs/plugin-react": "^5.0.2",
     "react": "^19.1.1",

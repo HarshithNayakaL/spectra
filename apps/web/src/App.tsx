@@ -4,16 +4,28 @@ import {
   ReactNode,
   useCallback,
   useEffect,
+  useRef,
   useMemo,
   useState,
 } from "react";
 import { auditSchema, type Audit } from "@spectra/schemas";
+import { buildFixPrompt, estimateTokens, rankFixes } from "@spectra/evaluation";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowUpRight01Icon } from "@hugeicons/core-free-icons";
+import {
+  ArrowUpRight01Icon,
+  GoogleGeminiIcon,
+} from "@hugeicons/core-free-icons";
+import {
+  FloatingCloudee,
+  useCloudeeMood,
+  type Mood,
+  type PageState,
+} from "./avatar/Cloudee";
 
 const API = import.meta.env.VITE_API_URL || "";
 
 const SECTIONS = [
+  { id: "intents", label: "Intent completion" },
   { id: "primary-entity", label: "Primary entity" },
   { id: "understanding", label: "Model understanding" },
   { id: "survival", label: "Information survival" },
@@ -46,7 +58,32 @@ export function App() {
       Boolean(location.pathname.match(/^\/audits\/[a-f0-9-]{36}$/)),
     ),
     [running, setRunning] = useState(false),
+    [intents, setIntents] = useState<string[]>([""]),
+    [model, setModel] = useState("gemini-3.1-flash-lite"),
     [path, setPath] = useState(location.pathname);
+  const score =
+    audit?.metrics.find((m) => m.dimension === "overall")?.score ?? null;
+  const pageState: PageState = error
+    ? "error"
+    : running
+      ? "running"
+      : url.trim().length > 3 && !audit
+        ? "typing"
+        : "idle";
+  const verdictMood: Mood | undefined = audit
+    ? score === null
+      ? "confused"
+      : score >= 80
+        ? "proud"
+        : score >= 60
+          ? "curious"
+          : "sad"
+    : undefined;
+  const { mood, poke } = useCloudeeMood(
+    pageState,
+    progress.length,
+    verdictMood,
+  );
   const id = path.match(/^\/audits\/([a-f0-9-]{36})$/)?.[1];
 
   useEffect(() => {
@@ -115,7 +152,14 @@ export function App() {
       const res = await fetch(`${API}/api/audits`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({
+          url,
+          model,
+          intents: intents
+            .map((text) => text.trim())
+            .filter((text) => text.length >= 3)
+            .map((text) => ({ text })),
+        }),
       });
       if (!res.ok) {
         const reason = await res
@@ -173,7 +217,15 @@ export function App() {
           <span className="brandRule" aria-hidden="true" />
           SPECTRA
         </a>
-        <span className="topMeta">AI search perception, measured</span>
+        <span className="topMeta">
+          <HugeiconsIcon
+            icon={GoogleGeminiIcon}
+            size={15}
+            strokeWidth={1.9}
+            aria-hidden="true"
+          />
+          Runs on Google Gemini
+        </span>
       </header>
       <main id="main">
         <ErrorBoundary>
@@ -183,6 +235,10 @@ export function App() {
             <Landing
               url={url}
               setUrl={setUrl}
+              intents={intents}
+              setIntents={setIntents}
+              model={model}
+              setModel={setModel}
               submit={submit}
               progress={progress}
               error={error}
@@ -193,6 +249,7 @@ export function App() {
           )}
         </ErrorBoundary>
       </main>
+      <FloatingCloudee mood={mood} onPoke={poke} />
     </>
   );
 }
@@ -215,7 +272,7 @@ const LOSSES = [
   {
     name: "Semantic graph",
     detail:
-      "Entities, relationships and claims are built, each one cited back to a source record.",
+      "Entities, relationships and claims are built, each cited back to a source record.",
   },
   {
     name: "Model understanding",
@@ -229,9 +286,40 @@ const LOSSES = [
   },
 ];
 
+export type ModelOption = {
+  id: string;
+  label: string;
+  inputTokenLimit: number;
+  outputTokenLimit: number;
+  aiMode?: boolean;
+  recommended?: boolean;
+};
+
+/** The catalogue is read from Gemini, so new models appear without a deploy. */
+function useModels() {
+  const [models, setModels] = useState<ModelOption[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API}/api/models`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("no models"))))
+      .then((body: { models: ModelOption[] }) => {
+        if (!cancelled) setModels(body.models ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return models;
+}
+
 function Landing({
   url,
   setUrl,
+  intents,
+  setIntents,
+  model,
+  setModel,
   submit,
   progress,
   error,
@@ -239,44 +327,172 @@ function Landing({
 }: {
   url: string;
   setUrl: (x: string) => void;
+  intents: string[];
+  setIntents: (x: string[]) => void;
+  model: string;
+  setModel: (x: string) => void;
   submit: (e: FormEvent) => void;
   progress: { stage: string; message: string }[];
   error: string;
   running: boolean;
 }) {
+  const models = useModels();
+  const filled = intents.filter((x) => x.trim().length > 2).length;
+
   return (
     <section className="landing">
-      <div className="landingInner">
-        <h1>Measure what AI search understands about your site.</h1>
-        <p className="landingLede">
-          SPECTRA crawls your pages, asks a model what it learned, and traces
-          each answer back to the evidence that supported it.
-        </p>
-
-        <form onSubmit={submit} className="analyze" aria-busy={running}>
-          <label htmlFor="target">Public website URL</label>
-          <div className="field">
-            <input
-              id="target"
-              type="url"
-              inputMode="url"
-              placeholder="https://example.com"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              required
-              aria-describedby="target-note"
-            />
-            <button disabled={running}>
-              {running ? "Running" : "Run audit"}
-            </button>
+      <div className="bento">
+        <div className="cell cellHero reveal" style={{ "--d": "0ms" } as never}>
+          <div className="kicker">
+            <span>AEO</span>
+            <span>Generative engine optimisation</span>
           </div>
-          <p className="analyzeNote" id="target-note">
-            Public HTTP and HTTPS sites only. No account needed.
+          <h1 className="heroType">
+            Run your own
+            <br />
+            intents
+          </h1>
+          <p className="heroLede">
+            Name the jobs customers hire your site for. Each one runs through
+            Google Gemini and is scored on whether it can be completed from your
+            pages alone, with the evidence that decided it.
           </p>
-        </form>
+
+          <form onSubmit={submit} className="analyze" aria-busy={running}>
+            <div className="fieldRow">
+              <label htmlFor="target">Site</label>
+              <div className="field">
+                <input
+                  id="target"
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://example.com"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="fieldRow">
+              <label htmlFor="intent-0">
+                Intents
+                <span className="labelHint">
+                  {filled
+                    ? `${filled} declared`
+                    : "optional, inferred if left empty"}
+                </span>
+              </label>
+              {intents.map((value, index) => (
+                <div className="intentRow" key={index}>
+                  <div className="field">
+                    <input
+                      id={`intent-${index}`}
+                      type="text"
+                      maxLength={280}
+                      placeholder={
+                        index === 0
+                          ? "Find the enterprise plan price per seat"
+                          : "Book a demo with a sales engineer"
+                      }
+                      value={value}
+                      onChange={(event) => {
+                        const next = [...intents];
+                        next[index] = event.target.value;
+                        setIntents(next);
+                      }}
+                    />
+                  </div>
+                  {intents.length > 1 && (
+                    <button
+                      type="button"
+                      className="rowDrop"
+                      onClick={() =>
+                        setIntents(intents.filter((_, i) => i !== index))
+                      }
+                      aria-label={`Remove intent ${index + 1}`}
+                    >
+                      &times;
+                    </button>
+                  )}
+                </div>
+              ))}
+              {intents.length < 5 && (
+                <button
+                  type="button"
+                  className="rowAdd"
+                  onClick={() => setIntents([...intents, ""])}
+                >
+                  + Add intent
+                </button>
+              )}
+            </div>
+
+            <div className="fieldRow">
+              <label htmlFor="model">Model</label>
+              <div className="field fieldSelect">
+                <HugeiconsIcon
+                  icon={GoogleGeminiIcon}
+                  size={17}
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                />
+                <select
+                  id="model"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                >
+                  {models.length ? (
+                    models.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                        {m.recommended ? " — default" : ""}
+                        {m.aiMode ? " — runs Google AI Mode" : ""}
+                      </option>
+                    ))
+                  ) : (
+                    <option value={model}>{model}</option>
+                  )}
+                </select>
+              </div>
+            </div>
+
+            <button className="runButton" disabled={running}>
+              {running ? "Running audit" : "Run audit"}
+            </button>
+            <p className="analyzeNote">
+              Public HTTP and HTTPS sites. No account needed.
+            </p>
+          </form>
+        </div>
+
+        <div
+          className="cell cellStat reveal"
+          style={{ "--d": "60ms" } as never}
+        >
+          <span className="statNum">4</span>
+          <span className="statLabel">phrasings per intent</span>
+          <p>
+            An answer that only works when the question is worded your way is
+            not an answer. Every intent is asked four ways and scored on all of
+            them.
+          </p>
+        </div>
+
+        <div
+          className="cell cellProof reveal"
+          style={{ "--d": "90ms" } as never}
+        >
+          <b>Every number traces back</b>
+          <p>
+            Each measurement cites the evidence records it came from, and a
+            failed intent names the stage that lost it. Deterministic scoring,
+            not a model-authored grade.
+          </p>
+        </div>
 
         {running && progress.length > 0 && (
-          <div className="progress" aria-live="polite">
+          <div className="cell cellProgress" aria-live="polite">
             <div className="progressHead">
               <b>{progress.at(-1)?.message}</b>
               <span className="progressCount">
@@ -284,10 +500,10 @@ function Landing({
               </span>
             </div>
             <ol className="progressSteps">
-              {progress.slice(-5).map((item, index) => (
+              {progress.slice(-4).map((item, index) => (
                 <li key={`${item.stage}-${index}`}>
                   <span>
-                    {String(progress.length - 4 + index).padStart(2, "0")}
+                    {String(progress.length - 3 + index).padStart(2, "0")}
                   </span>
                   {item.stage.replaceAll("_", " ")}
                 </li>
@@ -297,44 +513,45 @@ function Landing({
         )}
 
         {error && (
-          <div className="notice" role="alert">
-            <b>Audit stopped</b>
-            <p>{error}</p>
-            <button
-              type="button"
-              className="noticeAction"
-              onClick={() => document.getElementById("target")?.focus()}
-            >
-              Check the URL and try again
-            </button>
+          <div className="cell cellError" role="alert">
+            <div className="notice">
+              <b>Audit stopped</b>
+              <p>{error}</p>
+              <button
+                type="button"
+                className="noticeAction"
+                onClick={() => document.getElementById("target")?.focus()}
+              >
+                Check the URL and try again
+              </button>
+            </div>
           </div>
         )}
 
-        <section className="stages">
-          <div className="stagesHead">
-            <h2>Where information disappears</h2>
-            <p>
-              A fact can sit in your HTML and still be missing from the answer.
-              SPECTRA measures every handover between the page and the model,
-              and keeps the evidence at each one.
-            </p>
-          </div>
-          {LOSSES.map((stage, index) => (
-            <div className="stageRow" key={stage.name}>
-              <span className="stageIndex">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              <span className="stageName">{stage.name}</span>
-              <p className="stageLoss">{stage.detail}</p>
-            </div>
-          ))}
-        </section>
+        <div
+          className="cell cellCaption reveal"
+          style={{ "--d": "130ms" } as never}
+        >
+          <h2>Where information disappears</h2>
+          <p>
+            A fact can sit in your HTML and still be missing from the answer.
+            SPECTRA measures every handover and keeps the evidence at each one.
+          </p>
+        </div>
 
-        <p className="landingFoot">
-          Deterministic measurements, not a model-authored score. Checks that
-          cannot be evaluated are reported as not applicable rather than
-          guessed.
-        </p>
+        {LOSSES.map((stage, index) => (
+          <div
+            className="cell cellStage reveal"
+            key={stage.name}
+            style={{ "--d": `${170 + index * 32}ms` } as never}
+          >
+            <span className="stageIndex">
+              {String(index + 1).padStart(2, "0")}
+            </span>
+            <b className="stageName">{stage.name}</b>
+            <p className="stageLoss">{stage.detail}</p>
+          </div>
+        ))}
       </div>
     </section>
   );
@@ -382,6 +599,17 @@ function Report({ audit }: { audit: Audit }) {
           <span className="barMeta">
             {audit.crawl?.pages.length ?? 0} pages, {audit.evidence.length}{" "}
             evidence records
+            {audit.model && (
+              <span className="barModel">
+                <HugeiconsIcon
+                  icon={GoogleGeminiIcon}
+                  size={13}
+                  strokeWidth={1.9}
+                  aria-hidden="true"
+                />
+                {audit.model}
+              </span>
+            )}
           </span>
         </div>
 
@@ -461,6 +689,96 @@ function Report({ audit }: { audit: Audit }) {
             </div>
           </section>
         )}
+
+        <section className="section" id="intents">
+          <h2>Intent completion</h2>
+          <p className="sectionNote">
+            {audit.intents.some((i) => i.source === "declared")
+              ? "The jobs you declared, each asked several ways and judged only against evidence found on the site."
+              : "No intents were declared, so these were inferred from the site. Declare your own on the next audit to measure the jobs you care about."}
+          </p>
+          {audit.intents.length ? (
+            <div className="entries">
+              {audit.intents.map((intent) => (
+                <article className="entry" key={intent.id}>
+                  <div className="entryAside">
+                    <div className={`state ${outcomeClass(intent.outcome)}`}>
+                      {intent.outcome.replaceAll("_", " ")}
+                    </div>
+                    <div className="entryIndex">
+                      {intent.variantsMeasured
+                        ? `${intent.variantsSatisfied}/${intent.variantsMeasured} phrasings`
+                        : intent.source}
+                    </div>
+                  </div>
+                  <div>
+                    <h3>{intent.text}</h3>
+                    {intent.answer && <p>{intent.answer}</p>}
+                    <dl className="entryFacts">
+                      {intent.unmetCriteria.length > 0 && (
+                        <>
+                          <dt>Not satisfied</dt>
+                          <dd>
+                            <ul className="criteria">
+                              {intent.unmetCriteria.map((c) => (
+                                <li className="unmet" key={c}>
+                                  {c}
+                                </li>
+                              ))}
+                            </ul>
+                          </dd>
+                        </>
+                      )}
+                      {intent.metCriteria.length > 0 && (
+                        <>
+                          <dt>Satisfied</dt>
+                          <dd>
+                            <ul className="criteria">
+                              {intent.metCriteria.map((c) => (
+                                <li key={c}>{c}</li>
+                              ))}
+                            </ul>
+                          </dd>
+                        </>
+                      )}
+                      {intent.failedAt && (
+                        <>
+                          <dt>Lost at</dt>
+                          <dd className="state failed">
+                            {intent.failedAt.replaceAll("_", " ")}
+                          </dd>
+                        </>
+                      )}
+                      {intent.variants.length > 1 && (
+                        <>
+                          <dt>Phrasings tested</dt>
+                          <dd>
+                            <ul className="criteria">
+                              {intent.variants.map((v) => (
+                                <li key={v}>{v}</li>
+                              ))}
+                            </ul>
+                          </dd>
+                        </>
+                      )}
+                      {intent.error && (
+                        <>
+                          <dt>Error</dt>
+                          <dd className="state error">{intent.error}</dd>
+                        </>
+                      )}
+                    </dl>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <Empty
+              title="No intents tested"
+              body="Declare the jobs an agent should be able to finish when you start an audit, and each one is measured against the evidence your pages publish."
+            />
+          )}
+        </section>
 
         <section className="section" id="primary-entity">
           <h2>Primary entity</h2>
@@ -813,26 +1131,69 @@ function Report({ audit }: { audit: Audit }) {
         <section className="section" id="fixes">
           <h2>Recommended fixes</h2>
           {audit.recommendations.length ? (
-            <div className="entries">
-              {audit.recommendations.map((x, i) => (
-                <div className="entry" key={x.id}>
-                  <div className="entryAside">
-                    <div className="entryIndex">
-                      {String(i + 1).padStart(2, "0")}
+            <>
+              <FixPrompt audit={audit} />
+              <div className="entries">
+                {rankFixes(audit.recommendations).map((x, i) => (
+                  <div className="entry" key={x.id}>
+                    <div className="entryAside">
+                      <div className="entryIndex">
+                        {String(i + 1).padStart(2, "0")}
+                      </div>
+                      <div className={`severity ${x.severity}`}>
+                        {x.severity}
+                      </div>
+                      {x.scoreImpact > 0 && (
+                        <div className="entryGain">
+                          +{x.scoreImpact.toFixed(1)} pts
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <h3>{x.change}</h3>
+                      <dl className="entryFacts">
+                        <dt>What failed</dt>
+                        <dd>{x.whatFailed}</dd>
+                        <dt>Likely cause</dt>
+                        <dd>{x.rationale}</dd>
+                        {x.missingFacts.length > 0 && (
+                          <>
+                            <dt>Missing facts</dt>
+                            <dd>
+                              <ul className="criteria">
+                                {x.missingFacts.map((f) => (
+                                  <li className="unmet" key={f}>
+                                    {f}
+                                  </li>
+                                ))}
+                              </ul>
+                            </dd>
+                          </>
+                        )}
+                        {x.steps.length > 0 && (
+                          <>
+                            <dt>Steps</dt>
+                            <dd>
+                              <ol className="steps">
+                                {x.steps.map((step) => (
+                                  <li key={step}>{step}</li>
+                                ))}
+                              </ol>
+                            </dd>
+                          </>
+                        )}
+                        {x.verify && (
+                          <>
+                            <dt>Verify</dt>
+                            <dd>{x.verify}</dd>
+                          </>
+                        )}
+                      </dl>
                     </div>
                   </div>
-                  <div>
-                    <h3>{x.change}</h3>
-                    <dl className="entryFacts">
-                      <dt>What failed</dt>
-                      <dd>{x.whatFailed}</dd>
-                      <dt>Why this helps</dt>
-                      <dd>{x.rationale}</dd>
-                    </dl>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </>
           ) : (
             <Empty
               title="No repairs generated"
@@ -999,6 +1360,108 @@ function EvidenceExplorer({ evidence }: { evidence: Audit["evidence"] }) {
   );
 }
 
+/**
+ * Assembles the brief for a coding agent. Severity-critical fixes start
+ * selected because they are the ones that cost real points; everything is
+ * adjustable, and the token budget is shown before anything is copied.
+ */
+function FixPrompt({ audit }: { audit: Audit }) {
+  const ranked = useMemo(
+    () => rankFixes(audit.recommendations),
+    [audit.recommendations],
+  );
+  const [selected, setSelected] = useState<string[]>(() =>
+    ranked
+      .filter((r) => r.severity === "critical" || r.severity === "high")
+      .map((r) => r.id)
+      .slice(0, 5),
+  );
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState("");
+  const prompt = useMemo(
+    () => buildFixPrompt(audit, { selected, apiUrl: API || location.origin }),
+    [audit, selected],
+  );
+  const points =
+    Math.round(
+      ranked
+        .filter((r) => selected.includes(r.id))
+        .reduce((sum, r) => sum + r.scoreImpact, 0) * 10,
+    ) / 10;
+
+  function toggle(id: string) {
+    setSelected(
+      selected.includes(id)
+        ? selected.filter((x) => x !== id)
+        : [...selected, id],
+    );
+  }
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopied("Copied to clipboard");
+    } catch {
+      setCopied("Copy failed. Open the preview and copy manually.");
+    }
+    setTimeout(() => setCopied(""), 4000);
+  }
+
+  return (
+    <div className="fixPrompt">
+      <div className="fixPromptHead">
+        <b>Fix prompt</b>
+        <span>
+          Pick the fixes to include, then hand the brief to a coding agent.
+        </span>
+      </div>
+      <ul className="fixPicker">
+        {ranked.map((fix) => (
+          <li key={fix.id}>
+            <label>
+              <input
+                type="checkbox"
+                checked={selected.includes(fix.id)}
+                onChange={() => toggle(fix.id)}
+              />
+              <span className="fixPickerName">{fix.whatFailed}</span>
+              <span className={`severity ${fix.severity}`}>{fix.severity}</span>
+              <span className="fixPickerGain">
+                +{fix.scoreImpact.toFixed(1)} pts
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <div className="fixPromptFoot">
+        <span className="fixPromptMeta">
+          {selected.length} of {ranked.length} fixes, +{points.toFixed(1)}{" "}
+          points recoverable, ~{estimateTokens(prompt).toLocaleString()} tokens
+        </span>
+        <div>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => setOpen(!open)}
+            aria-expanded={open}
+          >
+            {open ? "Hide preview" : "Preview"}
+          </button>
+          <button type="button" onClick={copy} disabled={!selected.length}>
+            Copy prompt
+          </button>
+        </div>
+      </div>
+      {copied && (
+        <p className="fixPromptStatus" role="status">
+          {copied}
+        </p>
+      )}
+      {open && <pre className="fixPromptPreview">{prompt}</pre>}
+    </div>
+  );
+}
+
 function SpecRow({
   k,
   v,
@@ -1120,6 +1583,14 @@ function useActiveSection(ids: string[]) {
     };
   }, [list]);
   return active;
+}
+
+function outcomeClass(outcome: string) {
+  return outcome === "satisfied"
+    ? "passed"
+    : outcome === "unsatisfied" || outcome === "error"
+      ? "failed"
+      : "unavailable";
 }
 
 function verdictOf(score: number | null | undefined) {

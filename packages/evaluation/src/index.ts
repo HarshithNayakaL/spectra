@@ -12,6 +12,7 @@ import { scoreChecks } from "@spectra/scoring";
 type RetrievalMode = Audit["retrievals"][number]["mode"];
 
 const allDimensions: EvaluationContract["dimensions"][number]["id"][] = [
+  "intent_completion",
   "machine_accessibility",
   "semantic_extraction",
   "entity_clarity",
@@ -85,6 +86,7 @@ const archetypeRegistry: Record<string, string[]> = {
   ],
 };
 const required: Record<(typeof allDimensions)[number], string[]> = {
+  intent_completion: ["declared_intents", "intent_attempts"],
   machine_accessibility: ["crawl.pages"],
   semantic_extraction: ["normalized_evidence"],
   entity_clarity: ["gemini.analysis", "semantic_graph"],
@@ -200,7 +202,11 @@ export function selectContract(analysis: SiteAnalysis): EvaluationContract {
           : "deterministic_evidence_check",
       normalization: "weighted_ratio",
       weight:
-        id.includes("retrievability") || id.includes("discoverability") ? 2 : 1,
+        id === "intent_completion"
+          ? 3
+          : id.includes("retrievability") || id.includes("discoverability")
+            ? 2
+            : 1,
       naBehavior: "exclude when required inputs are unavailable",
     })),
     unsupportedObservations: analysis.importantInformationClasses.filter(
@@ -227,7 +233,28 @@ export function evaluate(audit: Audit): Audit {
     groundedMeasured = grounded.filter(
       (r) => r.status === "passed" || r.status === "failed",
     );
+  const measuredIntents = audit.intents.filter(
+    (intent) => intent.variantsMeasured > 0,
+  );
+
   const checks: Check[] = [
+    measuredIntents.length
+      ? check(
+          "intent-completion",
+          "intent_completion",
+          "Declared intents can be completed from site evidence",
+          intentRatio(measuredIntents),
+          3,
+          measuredIntents.flatMap((intent) => intent.evidenceIds),
+        )
+      : na(
+          "intent-completion",
+          "intent_completion",
+          "Declared intents can be completed from site evidence",
+          audit.intents.length
+            ? "Intents were declared but could not be tested"
+            : "No intents were declared for this audit",
+        ),
     check(
       "public-pages",
       "machine_accessibility",
@@ -328,21 +355,114 @@ export function evaluate(audit: Audit): Audit {
         ),
   ];
   audit.metrics = scoreChecks(checks);
+
   audit.stability = buildStability(audit);
   audit.survival = claims.map((claim) =>
     buildSurvival(audit, claim.id, claim.evidenceIds),
   );
   audit.issues = diagnose(audit, hasDescription, hasLd, bodyEvidence);
-  audit.recommendations = audit.issues.map((issue, index) => ({
-    id: `fix-${index + 1}`,
-    issueId: issue.id,
-    whatFailed: issue.title,
-    where: failureWhere(issue.type),
-    evidenceIds: issue.evidenceIds,
-    change: issue.recommendedFix,
-    rationale: `This addresses the measured ${failureWhere(issue.type)} failure without adding unsupported business facts.`,
-  }));
+  audit.recommendations = buildRecommendations(audit, checks);
   return audit;
+}
+
+const CHECKS_BY_ISSUE: Record<string, string[]> = {
+  weak_machine_description: ["metadata"],
+  missing_structured_data: ["jsonld"],
+  intent_not_completable: ["intent-completion"],
+  retrieval_instability: ["direct-retrieval", "grounded-retrieval"],
+};
+
+/**
+ * Exact recoverable points, not an estimate. The overall metric is
+ * sum(weight x value) / sum(weight), so a check moving to a full pass is worth
+ * weight x (1 - value) / denominator of the 100-point scale. Checks that are
+ * currently N/A are excluded: making them applicable also moves the
+ * denominator, and quoting a number for that would be a guess.
+ */
+export function scoreImpact(checks: Check[], checkIds: string[]): number {
+  const applied = checks.filter((c) => c.status !== "na");
+  const denominator = applied.reduce((sum, c) => sum + c.weight, 0);
+  if (!denominator) return 0;
+  const gain = applied
+    .filter((c) => checkIds.includes(c.id))
+    .reduce((sum, c) => sum + c.weight * (1 - c.value), 0);
+  return Math.round((gain / denominator) * 1000) / 10;
+}
+
+function buildRecommendations(
+  audit: Audit,
+  checks: Check[],
+): Audit["recommendations"] {
+  const pageUrls = (audit.crawl?.pages ?? []).slice(0, 8).map((p) => p.url);
+  const byDimension = new Map(checks.map((c) => [c.id, c.dimension]));
+  return audit.issues.map((issue, index) => {
+    const checkIds = CHECKS_BY_ISSUE[issue.type] ?? [];
+    const intent = audit.intents.find((i) => `intent-${i.id}` === issue.id);
+    const dimension = checkIds.map((id) => byDimension.get(id)).find(Boolean);
+    return {
+      id: `fix-${index + 1}`,
+      issueId: issue.id,
+      whatFailed: issue.title,
+      where: failureWhere(issue.type),
+      evidenceIds: issue.evidenceIds,
+      change: issue.recommendedFix,
+      rationale: issue.likelyCause,
+      severity: issue.severity,
+      dimension: dimension ?? null,
+      checkIds,
+      scoreImpact: scoreImpact(checks, checkIds),
+      missingFacts: intent?.unmetCriteria ?? [],
+      pageUrls,
+      steps: fixSteps(issue, intent),
+      verify: verifyStep(issue, intent),
+    };
+  });
+}
+
+function fixSteps(
+  issue: Audit["issues"][number],
+  intent: Audit["intents"][number] | undefined,
+): string[] {
+  if (intent)
+    return [
+      intent.unmetCriteria.length
+        ? `Publish crawlable text that satisfies every missing fact listed above. Plain text in the document, not an image, a script-rendered widget or a PDF.`
+        : "Write the answer to this intent as plain crawlable text on a page the crawler already reaches.",
+      "Put it on a page reachable from the entry page within two link hops, and keep it out of <nav>, <footer> and <form>, which are stripped before text extraction.",
+      "Restate the same fact in JSON-LD on that page so it survives as structured evidence as well as prose.",
+      "Link to the page from the entry page using the words a person would search for, so the crawler and the model both associate them.",
+    ];
+  if (issue.type === "weak_machine_description")
+    return [
+      'Add a <meta name="description"> to every crawlable page, naming the primary entity and what it does.',
+      "Keep it under about 160 characters and make it specific to that page, not the same string site-wide.",
+    ];
+  if (issue.type === "missing_structured_data")
+    return [
+      'Add a <script type="application/ld+json"> block to the entry page describing the primary entity.',
+      "Use only facts already stated in the visible text of that page. Do not introduce claims the page does not make.",
+      "Include the fields the archetype implies, and set url to the canonical domain.",
+    ];
+  if (issue.type === "retrieval_instability")
+    return [
+      "State the claim once, in one canonical place, in unambiguous wording.",
+      "Reuse that exact wording wherever the claim appears, instead of paraphrasing it per page.",
+      "Reinforce it with structured data and an internal link from the entry page.",
+    ];
+  return [issue.recommendedFix];
+}
+
+function verifyStep(
+  issue: Audit["issues"][number],
+  intent: Audit["intents"][number] | undefined,
+): string {
+  if (intent)
+    return `Re-run the audit with the same declared intent. The intent should report "satisfied" across all phrasings, and the ${intent.failedAt ?? "model understanding"} stage should read "survived".`;
+  if (issue.type === "weak_machine_description")
+    return "Re-run the audit. The Measurements table should show structured evidence gaining the metadata check, and a description record should appear under Evidence for each page.";
+  if (issue.type === "missing_structured_data")
+    return "Re-run the audit. A json_ld evidence record should appear under Evidence, and the structured evidence measurement should rise.";
+  return "Re-run the audit and confirm the measurement for this dimension has moved.";
 }
 
 function check(
@@ -379,6 +499,14 @@ function na(
     evidenceIds: [],
     limitation,
   };
+}
+function intentRatio(intents: Audit["intents"]) {
+  const total = intents.reduce(
+    (sum, intent) =>
+      sum + intent.variantsSatisfied / Math.max(1, intent.variantsMeasured),
+    0,
+  );
+  return intents.length ? total / intents.length : 0;
 }
 function ratio(results: Audit["retrievals"]) {
   return results.length
@@ -506,6 +634,34 @@ function diagnose(
   const issues: Audit["issues"] = [],
     graph = audit.graph,
     claims = graph?.claims ?? [];
+  for (const intent of audit.intents) {
+    if (intent.outcome !== "unsatisfied" && intent.outcome !== "partial")
+      continue;
+    const failed = intent.outcome === "unsatisfied";
+    issues.push(
+      issue(
+        `intent-${intent.id}`,
+        "intent_not_completable",
+        failed ? "critical" : "high",
+        failed
+          ? `An agent cannot complete: ${intent.text}`
+          : `An agent completes only some phrasings of: ${intent.text}`,
+        failed
+          ? `No phrasing of this intent could be completed from the evidence on the site.`
+          : `${intent.variantsSatisfied} of ${intent.variantsMeasured} phrasings completed this intent. The same question worded differently fails.`,
+        [],
+        [],
+        intent.evidenceIds,
+        intent.unmetCriteria.length
+          ? `${intent.unmetCriteria.length} fact${intent.unmetCriteria.length === 1 ? "" : "s"} the intent depends on are absent from every crawled record. The site may state them somewhere the crawler cannot read: inside nav or footer markup, behind JavaScript, or in an image.`
+          : "The evidence needed to satisfy this intent did not survive to the model.",
+        intent.unmetCriteria.length
+          ? `Publish the ${intent.unmetCriteria.length} missing fact${intent.unmetCriteria.length === 1 ? "" : "s"} as crawlable text on a page an agent reaches.`
+          : `State the answer to this intent in crawlable text near the primary entity, and reinforce it with structured data.`,
+        failed ? 0.95 : 0.85,
+      ),
+    );
+  }
   if (!hasDescription)
     issues.push(
       issue(
@@ -588,9 +744,17 @@ function issue(
   };
 }
 function failureWhere(type: string) {
+  if (type.includes("intent")) return "intent completion";
   return type.includes("retrieval")
     ? "retrieval"
     : type.includes("structured") || type.includes("description")
       ? "structured evidence"
       : "semantic interpretation";
 }
+
+export {
+  buildFixPrompt,
+  rankFixes,
+  estimateTokens,
+  type FixPromptOptions,
+} from "./fix-prompt";
