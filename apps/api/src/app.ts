@@ -2,14 +2,13 @@ import "./config";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
-import { intentRequestSchema } from "@spectra/schemas";
 import {
   DEFAULT_MODEL,
   FALLBACK_MODELS,
   isValidModelId,
   listModels,
 } from "./models";
-import { runAudit } from "./pipeline";
+import { runAudit } from "./audit";
 import { getAudit, storeKind } from "./store";
 
 export const app = new Hono();
@@ -36,7 +35,7 @@ app.use(
 app.get("/api/health", (c) =>
   c.json({
     status: "ok",
-    scoringVersion: "spectra-v0.1",
+    version: "spectra-v2",
     model: process.env.GEMINI_MODEL || DEFAULT_MODEL,
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
     storage: storeKind,
@@ -71,8 +70,8 @@ app.post("/api/audits", async (c) => {
   const parsed = z
     .object({
       url: z.string().min(1).max(2048),
-      // Up to five jobs the operator wants an agent to be able to finish.
-      intents: z.array(intentRequestSchema).max(5).default([]),
+      // Up to five questions the operator's buyers ask AI; the headline test.
+      prompts: z.array(z.string().trim().min(3).max(280)).max(5).default([]),
       model: z
         .string()
         .refine(isValidModelId, "Unrecognised model id")
@@ -83,9 +82,11 @@ app.post("/api/audits", async (c) => {
     return c.json(
       {
         error:
-          parsed.error.issues[0]?.path[0] === "intents"
-            ? "Each intent needs 3 to 280 characters, with at most 6 success criteria."
-            : "A URL is required",
+          parsed.error.issues[0]?.path[0] === "prompts"
+            ? "Each question needs 3 to 280 characters, and at most 5 are allowed."
+            : parsed.error.issues[0]?.path[0] === "model"
+              ? "That model is not available."
+              : "A URL is required",
       },
       400,
     );
@@ -123,7 +124,7 @@ app.post("/api/audits", async (c) => {
           audit: await runAudit(
             target.value,
             send,
-            parsed.data.intents,
+            parsed.data.prompts,
             parsed.data.model,
           ),
         });

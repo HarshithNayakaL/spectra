@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { entitySchema, relationshipSchema } from "@spectra/schemas";
-import { retryAfterMs, stripJsonFence } from "./index";
+import { readableError, retryAfterMs, stripJsonFence } from "./index";
 
 const header = (value: string | null) => ({ headers: { get: () => value } });
 
@@ -38,16 +37,22 @@ describe("fenced JSON", () => {
   });
 });
 
-describe("response schema matches the validating schema", () => {
-  it("offers Gemini exactly the entity types the parser accepts", () => {
-    expect(entitySchema.shape.type.options).toContain("Organization");
-    expect(entitySchema.shape.type.options.length).toBeGreaterThan(0);
+describe("readable errors", () => {
+  it("keeps only Google's sentence, not the JSON envelope", () => {
+    const body = JSON.stringify({
+      error: {
+        code: 429,
+        message:
+          "You exceeded your current quota, please check your plan. For more information on this error, head to: https://ai.google.dev",
+        status: "RESOURCE_EXHAUSTED",
+      },
+    });
+    expect(readableError(body)).toBe(
+      "You exceeded your current quota, please check your plan.",
+    );
   });
 
-  it("offers Gemini exactly the predicates the parser accepts", () => {
-    expect(relationshipSchema.shape.predicate.options).toContain("created");
-    expect(relationshipSchema.shape.predicate.options.length).toBeGreaterThan(
-      0,
-    );
+  it("falls back to trimmed text for non-JSON bodies", () => {
+    expect(readableError("  upstream\n timeout ")).toBe("upstream timeout");
   });
 });

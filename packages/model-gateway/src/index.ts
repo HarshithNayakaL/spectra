@@ -1,57 +1,46 @@
 import { z } from "zod";
-import {
-  entitySchema,
-  relationshipSchema,
-  semanticGraphSchema,
-  siteAnalysisSchema,
-  type SemanticGraph,
-  type SiteAnalysis,
-  type SourceEvidence,
-} from "@spectra/schemas";
+import { profileSchema, type Profile } from "@spectra/schemas";
 
 type Usage = { inputTokens?: number; outputTokens?: number };
-type Result<T> = { value: T; usage: Usage; durationMs: number };
-export type QueryGroup = { claimId: string; variants: string[] };
-export type IntentVerdict = {
-  answer: string;
-  metCriteria: string[];
-  unmetCriteria: string[];
-  satisfied: boolean;
-  reason: string;
+export type Result<T> = { value: T; usage: Usage; durationMs: number };
+
+export type ProfileInput = {
+  host: string;
+  pages: Array<{
+    url: string;
+    title: string;
+    description: string;
+    headings: string[];
+    excerpt: string;
+  }>;
+  organization: unknown;
+  customPrompts: string[];
 };
-export type GroundedAnswer = {
+export type SiteProfile = Profile & {
+  categoryPrompts: string[];
+  brandedPrompts: string[];
+};
+export type Answer = {
   answer: string;
   sources: Array<{ uri: string; title: string }>;
-  metadata: unknown;
+  queries: string[];
 };
+export type AnswerAnalysis = {
+  id: string;
+  competitors: string[];
+  sentiment: "positive" | "neutral" | "negative" | null;
+  inaccuracies: string[];
+};
+
 export interface ModelProvider {
-  analyzeSite(evidence: SourceEvidence[]): Promise<Result<SiteAnalysis>>;
-  extractSemanticGraph(
-    evidence: SourceEvidence[],
-    analysis: SiteAnalysis,
-  ): Promise<Result<SemanticGraph>>;
-  generateRetrievalQueries(graph: SemanticGraph): Promise<Result<QueryGroup[]>>;
-  answerDirect(
-    query: string,
-    claim: string,
-    evidence: SourceEvidence[],
-  ): Promise<Result<{ answer: string; supported: boolean; reason: string }>>;
-  answerGrounded(query: string): Promise<Result<GroundedAnswer>>;
-  evaluateRetrievedAnswer(
-    query: string,
-    answer: string,
-    claim: string,
-  ): Promise<Result<{ correct: boolean; reason: string }>>;
-  deriveIntentCriteria(
-    intent: string,
-    analysis: SiteAnalysis | null,
-  ): Promise<Result<string[]>>;
-  generateIntentVariants(intent: string): Promise<Result<string[]>>;
-  attemptIntent(
-    query: string,
-    criteria: string[],
-    evidence: SourceEvidence[],
-  ): Promise<Result<IntentVerdict>>;
+  readonly model: string;
+  profileSite(input: ProfileInput): Promise<Result<SiteProfile>>;
+  /** Asks the question exactly as a user would, optionally grounded in Google Search. */
+  ask(query: string, grounded: boolean): Promise<Result<Answer>>;
+  analyseAnswers(
+    profile: Profile,
+    items: Array<{ id: string; prompt: string; answer: string }>,
+  ): Promise<Result<AnswerAnalysis[]>>;
 }
 export class GroundingUnavailableError extends Error {}
 /** The request could not finish before the caller's deadline. */
@@ -59,173 +48,68 @@ export class DeadlineError extends Error {}
 /** A failure that will repeat identically on retry (bad key, bad request). */
 export class PermanentModelError extends Error {}
 
-const queryGroupsSchema = z.array(
-  z.object({
-    claimId: z.string(),
-    variants: z.array(z.string()).min(3).max(4),
-  }),
-);
-const directSchema = z.object({
-  answer: z.string(),
-  supported: z.boolean(),
-  reason: z.string(),
+const siteProfileSchema = profileSchema.extend({
+  categoryPrompts: z.array(z.string()).min(1).max(8),
+  brandedPrompts: z.array(z.string()).min(1).max(3),
 });
-const judgmentSchema = z.object({ correct: z.boolean(), reason: z.string() });
-const criteriaSchema = z.object({
-  criteria: z.array(z.string()).min(1).max(5),
-});
-const variantsSchema = z.object({
-  variants: z.array(z.string()).min(1).max(4),
-});
-const intentVerdictSchema = z.object({
-  answer: z.string(),
-  metCriteria: z.array(z.string()).default([]),
-  unmetCriteria: z.array(z.string()).default([]),
-  satisfied: z.boolean(),
-  reason: z.string(),
-});
-const criteriaResponseSchema = {
+const siteProfileResponseSchema = {
   type: "object",
   properties: {
-    criteria: { type: "array", items: { type: "string" } },
-  },
-  required: ["criteria"],
-};
-const variantsResponseSchema = {
-  type: "object",
-  properties: {
-    variants: { type: "array", items: { type: "string" } },
-  },
-  required: ["variants"],
-};
-const intentVerdictResponseSchema = {
-  type: "object",
-  properties: {
-    answer: { type: "string" },
-    metCriteria: { type: "array", items: { type: "string" } },
-    unmetCriteria: { type: "array", items: { type: "string" } },
-    satisfied: { type: "boolean" },
-    reason: { type: "string" },
-  },
-  required: ["answer", "metCriteria", "unmetCriteria", "satisfied", "reason"],
-};
-// The graph schema validates these as enums. Declaring them as bare strings
-// in the response schema let Gemini answer with values the parser then
-// rejected, failing the whole semantic stage after the tokens were spent.
-const ENTITY_TYPES = entitySchema.shape.type.options;
-const RELATIONSHIP_PREDICATES = relationshipSchema.shape.predicate.options;
-
-const siteResponseSchema = {
-  type: "object",
-  properties: {
-    primaryEntity: {
-      type: "object",
-      properties: {
-        name: { type: "string" },
-        type: { type: "string" },
-        description: { type: "string" },
-        evidenceIds: { type: "array", items: { type: "string" } },
-      },
-      required: ["name", "type", "description", "evidenceIds"],
-    },
-    siteArchetype: { type: "string" },
-    secondaryArchetypes: { type: "array", items: { type: "string" } },
-    purpose: { type: "array", items: { type: "string" } },
-    intendedAudience: { type: "array", items: { type: "string" } },
-    importantInformationClasses: { type: "array", items: { type: "string" } },
-    expectedUserQuestions: { type: "array", items: { type: "string" } },
-    expectedUserIntents: { type: "array", items: { type: "string" } },
-    confidence: {
-      type: "object",
-      properties: {
-        overall: { type: "number" },
-        reasons: { type: "array", items: { type: "string" } },
-      },
-      required: ["overall", "reasons"],
-    },
-    ambiguities: { type: "array", items: { type: "string" } },
+    brand: { type: "string" },
+    aliases: { type: "array", items: { type: "string" } },
+    category: { type: "string" },
+    description: { type: "string" },
+    audience: { type: "string" },
+    market: { type: "string" },
+    facts: { type: "array", items: { type: "string" } },
+    categoryPrompts: { type: "array", items: { type: "string" } },
+    brandedPrompts: { type: "array", items: { type: "string" } },
   },
   required: [
-    "primaryEntity",
-    "siteArchetype",
-    "secondaryArchetypes",
-    "purpose",
-    "intendedAudience",
-    "importantInformationClasses",
-    "expectedUserQuestions",
-    "expectedUserIntents",
-    "confidence",
-    "ambiguities",
+    "brand",
+    "aliases",
+    "category",
+    "description",
+    "audience",
+    "market",
+    "facts",
+    "categoryPrompts",
+    "brandedPrompts",
   ],
 };
-const graphResponseSchema = {
+const analysisSchema = z.object({
+  answers: z.array(
+    z.object({
+      id: z.string(),
+      competitors: z.array(z.string()).default([]),
+      sentiment: z
+        .enum(["positive", "neutral", "negative", "none"])
+        .default("none"),
+      inaccuracies: z.array(z.string()).default([]),
+    }),
+  ),
+});
+const analysisResponseSchema = {
   type: "object",
   properties: {
-    entities: {
+    answers: {
       type: "array",
       items: {
         type: "object",
         properties: {
           id: { type: "string" },
-          name: { type: "string" },
-          type: { type: "string", enum: ENTITY_TYPES },
-          description: { type: "string" },
-          evidenceIds: { type: "array", items: { type: "string" } },
+          competitors: { type: "array", items: { type: "string" } },
+          sentiment: {
+            type: "string",
+            enum: ["positive", "neutral", "negative", "none"],
+          },
+          inaccuracies: { type: "array", items: { type: "string" } },
         },
-        required: ["id", "name", "type", "evidenceIds"],
+        required: ["id", "competitors", "sentiment", "inaccuracies"],
       },
     },
-    relationships: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          subjectId: { type: "string" },
-          predicate: { type: "string", enum: RELATIONSHIP_PREDICATES },
-          objectId: { type: "string" },
-          evidenceIds: { type: "array", items: { type: "string" } },
-          confidence: { type: "number" },
-        },
-        required: [
-          "id",
-          "subjectId",
-          "predicate",
-          "objectId",
-          "evidenceIds",
-          "confidence",
-        ],
-      },
-    },
-    claims: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          subject: { type: "string" },
-          predicate: { type: "string" },
-          object: { type: "string" },
-          importance: { type: "number" },
-          extractionConfidence: { type: "number" },
-          informationClass: { type: "string" },
-          evidenceIds: { type: "array", items: { type: "string" } },
-        },
-        required: [
-          "id",
-          "subject",
-          "predicate",
-          "object",
-          "importance",
-          "extractionConfidence",
-          "informationClass",
-          "evidenceIds",
-        ],
-      },
-    },
-    ambiguities: { type: "array", items: { type: "string" } },
   },
-  required: ["entities", "relationships", "claims", "ambiguities"],
+  required: ["answers"],
 };
 
 export class GeminiProvider implements ModelProvider {
@@ -234,11 +118,11 @@ export class GeminiProvider implements ModelProvider {
   // Serverless has a hard wall clock, so pacing and retries are tighter there.
   private readonly minimumInterval = Number(
     process.env.GEMINI_MIN_REQUEST_INTERVAL_MS ||
-      (process.env.VERCEL ? 1200 : 7000),
+      (process.env.VERCEL ? 1000 : 4000),
   );
   private readonly maxAttempts = Math.max(
     1,
-    Number(process.env.GEMINI_MAX_ATTEMPTS || (process.env.VERCEL ? 3 : 6)),
+    Number(process.env.GEMINI_MAX_ATTEMPTS || 3),
   );
   /** Epoch ms after which no request may start or keep waiting. */
   private readonly deadline: number;
@@ -259,115 +143,97 @@ export class GeminiProvider implements ModelProvider {
     await delay(ms);
   }
 
-  async analyzeSite(evidence: SourceEvidence[]) {
+  async profileSite(input: ProfileInput) {
+    const pages = input.pages
+      .map(
+        (page) =>
+          `URL: ${page.url}\nTITLE: ${page.title}\nDESCRIPTION: ${page.description}\nHEADINGS: ${page.headings.join(" | ")}\nTEXT: ${page.excerpt}`,
+      )
+      .join("\n---\n")
+      .slice(0, 40_000);
     return this.structured(
-      `Classify the website using only the supplied evidence IDs. Do not score it. Identify its primary entity, archetype, purpose, intended audiences, important information classes, user questions/intents, confidence and ambiguities. The primary entity must cite evidence IDs.\nEVIDENCE:\n${budget(evidence)}`,
-      siteAnalysisSchema,
-      siteResponseSchema,
-    );
-  }
-  async extractSemanticGraph(
-    evidence: SourceEvidence[],
-    analysis: SiteAnalysis,
-  ) {
-    return this.structured(
-      `Extract a canonical semantic graph using only directly supported facts. Every entity, relationship and claim must cite exact supplied evidence IDs. Never create plausible but unsupported edges. Claims need importance, extraction confidence, and information class.\nCLASSIFICATION:${JSON.stringify(analysis)}\nEVIDENCE:${budget(evidence)}`,
-      semanticGraphSchema,
-      graphResponseSchema,
-    );
-  }
-  async generateRetrievalQueries(graph: SemanticGraph) {
-    return this.structured(
-      `For each supplied claim, generate 3-4 natural, semantically equivalent questions a user might ask an AI search system. Keep the exact claimId. Do not answer the questions.\nCLAIMS:${JSON.stringify(graph.claims)}`,
-      queryGroupsSchema,
-    );
-  }
-  async answerDirect(query: string, claim: string, evidence: SourceEvidence[]) {
-    return this.structured(
-      `Answer the question using only the supplied website evidence, then state whether that evidence-backed answer correctly supports the expected claim. If evidence is insufficient or contradicts it, set supported=false.\nQUESTION:${query}\nEXPECTED CLAIM:${claim}\nEVIDENCE:${budget(evidence)}`,
-      directSchema,
-    );
-  }
-  async evaluateRetrievedAnswer(query: string, answer: string, claim: string) {
-    return this.structured(
-      `Judge whether the answer correctly supports the expected claim. Be strict about subject, relationship and object.\nQUESTION:${query}\nEXPECTED CLAIM:${claim}\nANSWER:${answer}`,
-      judgmentSchema,
+      `You are profiling a business from its own website so its visibility in AI answers can be measured.
+
+Return:
+- brand: the business's name as customers say it (not the domain, not a slogan).
+- aliases: other names or spellings in use (may be empty).
+- category: a short noun phrase for what it sells, as a buyer would search for it (e.g. "B2B contact data provider", "project management software", "dental clinic in Austin").
+- description: one factual sentence: what it offers and to whom.
+- audience: who buys it.
+- market: the geography it serves if stated, else "".
+- facts: 3 to 5 specific, checkable facts stated on the site (numbers, founding year, locations, named products, prices). Never invent.
+- categoryPrompts: ${input.customPrompts.length ? 3 : 5} questions a real buyer would type into ChatGPT or Google AI Mode while looking for this kind of business, WITHOUT naming the brand. Mix "best X for Y", "top X providers", "how do I choose X", "alternatives to <a well-known competitor>", and one specific need the site serves. Include the market if the business is local.
+- brandedPrompts: 2 questions a buyer asks about this brand by name, such as "What is <brand> and is it legit?" or "<brand> pricing and reviews".
+
+WEBSITE ${input.host}
+${input.organization ? `ORGANIZATION MARKUP: ${JSON.stringify(input.organization).slice(0, 2000)}\n` : ""}${pages}`,
+      siteProfileSchema,
+      siteProfileResponseSchema,
     );
   }
 
-  /**
-   * Only used when the operator declared an intent but no success criteria.
-   * Criteria must be checkable against page evidence, not opinions.
-   */
-  async deriveIntentCriteria(intent: string, analysis: SiteAnalysis | null) {
-    const result = await this.structured(
-      `A website operator wants to know whether an AI assistant can complete this job using only their website. Write 2 to 4 success criteria that decide whether the job was done. Each criterion must be a single, concrete, checkable fact the answer has to contain, such as a named price, a named page, a specific figure or a specific action. Do not write vague criteria like "is helpful" or "is accurate". Do not invent facts about the site.\nJOB: ${intent}${analysis ? `\nSITE CLASSIFICATION: ${JSON.stringify(analysis.primaryEntity)} archetype=${analysis.siteArchetype}` : ""}`,
-      criteriaSchema,
-      criteriaResponseSchema,
-    );
-    return { ...result, value: result.value.criteria };
-  }
-
-  async generateIntentVariants(intent: string) {
-    const result = await this.structured(
-      `Rewrite this request as 3 natural, semantically equivalent questions a real person would type into an AI assistant. Keep the same job. Vary the wording, not the meaning. Do not answer them.\nREQUEST: ${intent}`,
-      variantsSchema,
-      variantsResponseSchema,
-    );
-    return { ...result, value: result.value.variants };
-  }
-
-  /**
-   * Answers strictly from crawled evidence, then judges the answer against the
-   * criteria. Both halves run in one call so the verdict cannot drift from the
-   * answer it is judging.
-   */
-  async attemptIntent(
-    query: string,
-    criteria: string[],
-    evidence: SourceEvidence[],
-  ) {
-    return this.structured(
-      `Act as an AI assistant that may only use the supplied website evidence. First answer the question from that evidence alone. Then check the answer against each success criterion and sort every criterion verbatim into metCriteria or unmetCriteria. Set satisfied=true only when every criterion is met. If the evidence does not support an answer, say so plainly and mark the criteria unmet. Never use outside knowledge about this organisation.\nQUESTION: ${query}\nSUCCESS CRITERIA: ${JSON.stringify(criteria)}\nEVIDENCE: ${budget(evidence)}`,
-      intentVerdictSchema,
-      intentVerdictResponseSchema,
-    );
-  }
-
-  async answerGrounded(query: string): Promise<Result<GroundedAnswer>> {
+  async ask(query: string, grounded: boolean): Promise<Result<Answer>> {
     const started = Date.now();
     const data = await this.request(
       {
-        contents: [
-          {
-            parts: [
-              {
-                text: `Use Google Search to answer this question accurately and concisely. If reliable results do not support an answer, say that it is unavailable.\nQUESTION: ${query}`,
-              },
-            ],
-          },
-        ],
-        tools: [{ google_search: {} }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 1200 },
+        contents: [{ role: "user", parts: [{ text: query }] }],
+        ...(grounded ? { tools: [{ google_search: {} }] } : {}),
+        generationConfig: { temperature: 0.4, maxOutputTokens: 1600 },
       },
-      true,
+      grounded,
     );
     const candidate = data.candidates?.[0];
     const answer = (candidate?.content?.parts ?? [])
       .map((p: any) => p.text ?? "")
-      .join(" ")
+      .join("")
       .trim();
+    if (!answer)
+      throw new Error(
+        `Gemini returned no answer${candidate?.finishReason ? ` (${candidate.finishReason})` : ""}`,
+      );
     const metadata = candidate?.groundingMetadata;
-    const chunks = metadata?.groundingChunks ?? [];
-    const sources = chunks.flatMap((chunk: any) =>
+    const sources = (metadata?.groundingChunks ?? []).flatMap((chunk: any) =>
       chunk.web?.uri
         ? [{ uri: chunk.web.uri, title: chunk.web.title ?? "" }]
         : [],
     );
     return {
-      value: { answer, sources, metadata },
+      value: { answer, sources, queries: metadata?.webSearchQueries ?? [] },
       usage: usage(data),
       durationMs: Date.now() - started,
+    };
+  }
+
+  async analyseAnswers(
+    profile: Profile,
+    items: Array<{ id: string; prompt: string; answer: string }>,
+  ) {
+    const result = await this.structured(
+      `Analyse AI assistant answers for how they treat one brand.
+
+BRAND: ${profile.brand}${profile.aliases.length ? ` (also: ${profile.aliases.join(", ")})` : ""}
+WHAT IT IS: ${profile.description}
+FACTS FROM ITS WEBSITE: ${JSON.stringify(profile.facts)}
+
+For every answer return:
+- id: unchanged.
+- competitors: every other company, product or brand the answer names or recommends, in the order they appear. Brand names only, no descriptions. Exclude ${profile.brand} itself, generic categories, and review sites, directories, publishers and social platforms (G2, Capterra, Gartner, Clutch, Reddit, LinkedIn, Wikipedia, Forbes).
+- sentiment: how the answer portrays ${profile.brand}: positive, neutral, negative, or none if it is not mentioned.
+- inaccuracies: statements about ${profile.brand} that contradict the facts above, each as one sentence saying what the answer claimed and what the site says. Empty when nothing contradicts. Never flag something merely because it is absent from the facts.
+
+ANSWERS:
+${JSON.stringify(items.map((i) => ({ ...i, answer: i.answer.slice(0, 5000) })))}`,
+      analysisSchema,
+      analysisResponseSchema,
+    );
+    return {
+      ...result,
+      value: result.value.answers.map((a) => ({
+        id: a.id,
+        competitors: a.competitors,
+        sentiment: a.sentiment === "none" ? null : a.sentiment,
+        inaccuracies: a.inaccuracies,
+      })),
     };
   }
 
@@ -457,12 +323,22 @@ export class GeminiProvider implements ModelProvider {
             `Google Search grounding is unavailable for ${this.model} (${response.status})`,
           );
         if (response.status === 429 || response.status >= 500) {
-          const detail = (await response.text())
-            .slice(0, 500)
-            .replace(/\s+/g, " ");
+          const detail = readableError(await response.text());
+          const quota = response.status === 429 && /quota/i.test(detail);
+          // Search grounding has its own, much smaller quota. Once it is spent
+          // the audit falls back to model-only answers instead of waiting.
+          if (grounding && quota)
+            throw new GroundingUnavailableError(
+              `Google Search grounding quota is exhausted for this API key`,
+            );
           last = new Error(
-            `Gemini ${response.status}${detail ? `: ${detail}` : ""}`,
+            quota
+              ? `Gemini API quota exhausted for ${this.model}`
+              : response.status >= 500
+                ? `Gemini is overloaded (${response.status})`
+                : `Gemini rate limit hit (${detail})`,
           );
+          if (quota) throw new PermanentModelError((last as Error).message);
           if (attempt === attempts - 1) break;
           const backoff =
             response.status === 429
@@ -474,9 +350,11 @@ export class GeminiProvider implements ModelProvider {
         if (!response.ok) {
           // 400/401/403 is a request or credential defect. Retrying it burns
           // five backoff windows to arrive at the same answer.
-          const detail = (await response.text()).slice(0, 300);
+          const detail = readableError(await response.text());
           throw new PermanentModelError(
-            `Gemini request failed (${response.status}): ${detail}`,
+            response.status === 403 || response.status === 401
+              ? `Gemini rejected the API key (${response.status}): ${detail}`
+              : `Gemini request failed (${response.status}): ${detail}`,
           );
         }
         return await response.json();
@@ -518,38 +396,19 @@ export function stripJsonFence(text: string): string {
   const fenced = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   return fenced ? fenced[1] : text;
 }
-function budget(evidence: SourceEvidence[]) {
-  const selected: SourceEvidence[] = [];
-  const semanticPages = new Set<string>();
-  let characters = 0;
-  const prioritized = [...evidence].sort((a, b) => {
-    const rank = (item: SourceEvidence) =>
-      ["title", "description", "json_ld", "heading", "visible_text"].indexOf(
-        item.evidenceType,
-      );
-    const aRank = rank(a),
-      bRank = rank(b);
-    return (aRank < 0 ? 99 : aRank) - (bRank < 0 ? 99 : bRank);
-  });
-  for (const item of prioritized) {
-    if (item.evidenceType === "semantic_html") {
-      const pageKey = item.pageId ?? item.url;
-      if (semanticPages.has(pageKey)) continue;
-      semanticPages.add(pageKey);
-    }
-    const textLimit = ["visible_text", "semantic_html"].includes(
-      item.evidenceType,
-    )
-      ? 4_000
-      : 1_500;
-    const compact = { ...item, text: item.text.slice(0, textLimit) };
-    const size = JSON.stringify(compact).length;
-    if (characters + size > 48_000) continue;
-    selected.push(compact);
-    characters += size;
-  }
-  return JSON.stringify(selected);
+/** Google wraps errors in JSON; keep only the human sentence. */
+export function readableError(body: string): string {
+  try {
+    const message = JSON.parse(body)?.error?.message;
+    if (typeof message === "string")
+      return message
+        .split(/\s+For more information/)[0]
+        .trim()
+        .slice(0, 200);
+  } catch {}
+  return body.replace(/\s+/g, " ").trim().slice(0, 200);
 }
+
 function usage(data: any): Usage {
   return {
     inputTokens: data.usageMetadata?.promptTokenCount,

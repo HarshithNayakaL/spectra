@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { get, put } from "@vercel/blob";
 import { auditSchema, type Audit } from "@spectra/schemas";
 
-const TERMINAL = new Set(["complete", "partial_failure", "fatal_failure"]);
+const TERMINAL = new Set(["complete", "partial", "failed"]);
 const ID = /^[a-f0-9-]{36}$/;
 
 /**

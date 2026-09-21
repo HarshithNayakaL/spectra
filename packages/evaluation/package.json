@@ -8,8 +8,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@spectra/schemas": "*",
-    "@spectra/scoring": "*"
+    "@spectra/schemas": "*"
   },
   "devDependencies": {
     "typescript": "^5.9.2",

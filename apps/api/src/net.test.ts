@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  extractMarkdownPage,
-  extractPage,
-  isAllowed,
-  isPublicAddress,
-  pageId,
-  parseRobots,
-} from "./node-crawler";
+import { isAllowed, parseRobots } from "@spectra/evaluation";
+import { isPublicAddress } from "./net";
 
 describe("compatibility crawler network safety", () => {
   it.each([
@@ -134,87 +128,5 @@ describe("robots.txt group matching", () => {
     expect(isAllowed(parseRobots(""), new URL("https://example.com/"))).toBe(
       true,
     );
-  });
-});
-
-describe("page identity", () => {
-  it("gives distinct URLs distinct ids even when their text matches", () => {
-    const a = extractMarkdownPage(
-      "https://example.com/a",
-      200,
-      "text/markdown",
-      "",
-    );
-    const b = extractMarkdownPage(
-      "https://example.com/b",
-      200,
-      "text/markdown",
-      "",
-    );
-    expect(a.fingerprint).toBe(b.fingerprint);
-    expect(a.id).not.toBe(b.id);
-  });
-
-  it("is stable for the same URL", () => {
-    expect(pageId(new URL("https://example.com/x"))).toBe(
-      pageId(new URL("https://example.com/x")),
-    );
-  });
-});
-
-describe("Markdown page extraction", () => {
-  it("keeps headings, prose, and public links as crawl evidence", () => {
-    const page = extractMarkdownPage(
-      "https://example.com/",
-      200,
-      "text/markdown; charset=utf-8",
-      "# Ada Lovelace\n\nAI engineer and creator.\n\n## Work\n[Atlas](/atlas)",
-    );
-    expect(page.title).toBe("Ada Lovelace");
-    expect(page.text).toContain("AI engineer");
-    expect(page.links).toContain("https://example.com/atlas");
-  });
-});
-
-describe("HTML page extraction", () => {
-  const html = `<!doctype html><html><head>
-      <title>Atlas</title>
-      <meta name="description" content="Atlas overview">
-      <script type="application/ld+json">{"@type":"Organization"}</script>
-    </head><body>
-      <nav><a href="/products">Products</a><a href="/pricing">Pricing</a></nav>
-      <main><h1>Atlas</h1><p>Body copy.</p><a href="/docs">Docs</a></main>
-      <footer><a href="/contact">Contact</a></footer>
-      <a href="javascript:void(0)">noop</a>
-      <a href="mailto:hi@example.com">mail</a>
-    </body></html>`;
-
-  it("harvests links from nav and footer, not just main content", () => {
-    const page = extractPage("https://example.com/", 200, "text/html", html);
-    expect(page.links).toEqual(
-      expect.arrayContaining([
-        "https://example.com/products",
-        "https://example.com/pricing",
-        "https://example.com/docs",
-        "https://example.com/contact",
-      ]),
-    );
-  });
-
-  it("skips non-navigable schemes", () => {
-    const page = extractPage("https://example.com/", 200, "text/html", html);
-    expect(page.links.some((href) => href.startsWith("javascript:"))).toBe(
-      false,
-    );
-    expect(page.links.some((href) => href.startsWith("mailto:"))).toBe(false);
-  });
-
-  it("still excludes chrome from the extracted text", () => {
-    const page = extractPage("https://example.com/", 200, "text/html", html);
-    expect(page.text).toContain("Body copy.");
-    expect(page.text).not.toContain("Pricing");
-    expect(page.title).toBe("Atlas");
-    expect(page.description).toBe("Atlas overview");
-    expect(page.jsonLd).toHaveLength(1);
   });
 });

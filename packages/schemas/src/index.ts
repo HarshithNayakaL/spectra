@@ -1,406 +1,255 @@
 import { z } from "zod";
 
-export const evidenceSchema = z.object({
-  id: z.string(),
-  url: z.string().url(),
-  text: z.string(),
-  value: z.unknown().optional(),
-  evidenceType: z
-    .enum([
-      "title",
-      "description",
-      "heading",
-      "visible_text",
-      "json_ld",
-      "open_graph",
-      "twitter",
-      "canonical",
-      "link",
-      "semantic_html",
-    ])
-    .default("visible_text"),
-  selector: z.string().optional(),
-  pageId: z.string().optional(),
-  structuredSource: z.string().optional(),
-  confidence: z.number().min(0).max(1).default(1),
-});
-export const entitySchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  type: z.enum([
-    "Person",
-    "Organization",
-    "Product",
-    "Project",
-    "Service",
-    "Location",
-    "Technology",
-    "Article",
-    "Event",
-    "Concept",
-    "Other",
-  ]),
-  description: z.string().optional(),
-  evidenceIds: z.array(z.string()).default([]),
-});
-export const relationshipSchema = z.object({
-  id: z.string(),
-  subjectId: z.string(),
-  predicate: z.enum([
-    "created",
-    "built",
-    "works_at",
-    "offers",
-    "located_in",
-    "owns",
-    "developed",
-    "specializes_in",
-    "authored",
-    "manufactures",
-    "provides",
-    "part_of",
-    "related_to",
-  ]),
-  objectId: z.string(),
-  evidenceIds: z.array(z.string()).min(1),
-  confidence: z.number().min(0).max(1),
-});
-export const claimSchema = z.object({
-  id: z.string(),
-  subject: z.string(),
-  predicate: z.string(),
-  object: z.string(),
-  importance: z.number().min(0).max(1),
-  extractionConfidence: z.number().min(0).max(1).default(0.5),
-  informationClass: z.string().default("general"),
-  evidenceIds: z.array(z.string()).min(1),
-});
-export const pageSchema = z.object({
-  id: z.string(),
+export const SCHEMA_VERSION = "spectra-v2" as const;
+
+/**
+ * Everything the scanner observed about one page, taken from the raw HTML the
+ * server sent. AI crawlers do not run JavaScript, so this is what they get.
+ */
+export const pageSignalsSchema = z.object({
   url: z.string().url(),
   status: z.number().int(),
+  ms: z.number(),
+  bytes: z.number(),
   title: z.string().default(""),
   description: z.string().default(""),
-  canonicalUrl: z.string().url().nullable().default(null),
+  h1: z.array(z.string()).default([]),
   headings: z
-    .array(
-      z.object({ level: z.number().int().min(1).max(6), text: z.string() }),
-    )
+    .array(z.object({ level: z.number().int(), text: z.string() }))
     .default([]),
-  text: z.string().default(""),
-  links: z.array(z.string().url()).default([]),
+  words: z.number().int().default(0),
+  lang: z.string().default(""),
+  canonical: z.string().default(""),
+  metaRobots: z.string().default(""),
+  xRobotsTag: z.string().default(""),
+  jsonLdTypes: z.array(z.string()).default([]),
   jsonLd: z.array(z.unknown()).default([]),
+  jsonLdErrors: z.number().int().default(0),
   openGraph: z.record(z.string(), z.string()).default({}),
-  twitter: z.record(z.string(), z.string()).default({}),
-  semanticElements: z
-    .array(z.object({ tag: z.string(), text: z.string() }))
-    .default([]),
-  fingerprint: z.string(),
-  contentType: z.string(),
-  duplicateOf: z.string().nullable().default(null),
-});
-export const crawlOutputSchema = z.object({
-  target: z.string().url(),
-  startedAt: z.string(),
-  completedAt: z.string(),
-  robots: z.object({
-    url: z.string().url(),
-    allowed: z.boolean(),
-    sitemaps: z.array(z.string().url()),
-    status: z.number().nullable(),
-  }),
-  pages: z.array(pageSchema),
-  crawlEdges: z.array(
-    z.object({ from: z.string().url(), to: z.string().url() }),
-  ),
-  warnings: z.array(z.string()),
-  failures: z
-    .array(z.object({ url: z.string(), stage: z.string(), error: z.string() }))
-    .default([]),
-  limits: z.object({
-    maxPages: z.number(),
-    maxDepth: z.number(),
-    maxBytes: z.number(),
-    timeoutMs: z.number(),
-    maxRedirects: z.number(),
-  }),
+  images: z.number().int().default(0),
+  imagesWithAlt: z.number().int().default(0),
+  scripts: z.number().int().default(0),
+  appShell: z.boolean().default(false),
+  questionHeadings: z.number().int().default(0),
+  hasDate: z.boolean().default(false),
+  hasAuthor: z.boolean().default(false),
+  socialLinks: z.array(z.string()).default([]),
+  internalLinks: z.array(z.string()).default([]),
+  excerpt: z.string().default(""),
 });
 
-export const siteAnalysisSchema = z.object({
-  primaryEntity: z.object({
-    name: z.string(),
-    type: z.string(),
-    description: z.string(),
-    evidenceIds: z.array(z.string()).default([]),
-  }),
-  siteArchetype: z.string(),
-  secondaryArchetypes: z.array(z.string()),
-  purpose: z.array(z.string()),
-  intendedAudience: z.array(z.string()).default([]),
-  importantInformationClasses: z.array(z.string()),
-  expectedUserQuestions: z.array(z.string()),
-  expectedUserIntents: z.array(z.string()).default([]),
-  confidence: z.object({
-    overall: z.number().min(0).max(1),
-    reasons: z.array(z.string()),
-  }),
-  ambiguities: z.array(z.string()),
+export const fileProbeSchema = z.object({
+  url: z.string(),
+  status: z.number().int().nullable(),
+  bytes: z.number().int().default(0),
+  contentType: z.string().default(""),
+  body: z.string().default(""),
 });
-export const semanticGraphSchema = z.object({
-  entities: z.array(entitySchema),
-  relationships: z.array(relationshipSchema),
-  claims: z.array(claimSchema),
-  ambiguities: z.array(z.string()).default([]),
-});
-export const dimensionIdSchema = z.enum([
-  "intent_completion",
-  "machine_accessibility",
-  "semantic_extraction",
-  "entity_clarity",
-  "relationship_preservation",
-  "claim_retrievability",
-  "structured_evidence",
-  "ai_search_discoverability",
-]);
-export const contractSchema = z.object({
-  version: z.literal("spectra-v0.1").default("spectra-v0.1"),
-  archetype: z.string(),
-  dimensions: z.array(
-    z.object({
-      id: dimensionIdSchema,
-      reason: z.string(),
-      requiredInputs: z.array(z.string()).default([]),
-      evaluationMethod: z.string().default("deterministic"),
-      normalization: z.string().default("weighted_ratio"),
-      weight: z.number().positive().default(1),
-      naBehavior: z.string().default("excluded_from_denominator"),
-    }),
-  ),
-  unsupportedObservations: z.array(z.string()).default([]),
-});
-export const survivalSchema = z.object({
-  claimId: z.string(),
-  stages: z.array(
-    z.object({
-      stage: z.enum([
-        "source",
-        "crawler",
-        "extraction",
-        "semantic_graph",
-        "model_understanding",
-        "retrieval",
-      ]),
-      status: z.enum(["survived", "failed", "not_tested"]),
-      evidenceIds: z.array(z.string()),
-      note: z.string(),
-    }),
-  ),
-  failedAt: z.string().nullable(),
-  survivalRate: z.number().min(0).max(1).default(0),
-});
-export const intentStageSchema = z.object({
-  stage: z.enum([
-    "source",
-    "crawler",
-    "extraction",
-    "semantic_graph",
-    "model_understanding",
-    "retrieval",
-  ]),
-  status: z.enum(["survived", "failed", "not_tested"]),
+
+export const botProbeSchema = z.object({
+  agent: z.string(),
+  status: z.number().int().nullable(),
+  blocked: z.boolean(),
   note: z.string().default(""),
 });
 
-/**
- * A job someone hires the site to do. Declared intents come from the operator
- * and are the thing being measured; model intents are inferred from the site
- * and are used only when nothing was declared.
- */
-export const intentSchema = z.object({
-  id: z.string(),
-  text: z.string().min(1).max(280),
-  source: z.enum(["declared", "model"]).default("model"),
-  successCriteria: z.array(z.string()).default([]),
-  criteriaSource: z.enum(["declared", "model"]).default("model"),
-  variants: z.array(z.string()).default([]),
-  outcome: z
-    .enum(["satisfied", "partial", "unsatisfied", "not_run", "error"])
-    .default("not_run"),
-  answer: z.string().nullable().default(null),
-  reason: z.string().default(""),
-  metCriteria: z.array(z.string()).default([]),
-  unmetCriteria: z.array(z.string()).default([]),
-  variantsSatisfied: z.number().int().default(0),
-  variantsMeasured: z.number().int().default(0),
-  evidenceIds: z.array(z.string()).default([]),
-  retrievalIds: z.array(z.string()).default([]),
-  stages: z.array(intentStageSchema).default([]),
-  failedAt: z.string().nullable().default(null),
-  error: z.string().optional(),
+export const scanSchema = z.object({
+  target: z.string().url(),
+  finalUrl: z.string().url(),
+  https: z.boolean(),
+  robots: fileProbeSchema,
+  sitemap: fileProbeSchema.extend({
+    urls: z.number().int().default(0),
+    referenced: z.boolean().default(false),
+  }),
+  llmsTxt: fileProbeSchema,
+  llmsFullTxt: fileProbeSchema,
+  bots: z.array(botProbeSchema).default([]),
+  pages: z.array(pageSignalsSchema),
+  failures: z
+    .array(z.object({ url: z.string(), error: z.string() }))
+    .default([]),
   durationMs: z.number().default(0),
 });
 
-/** What the caller asked us to measure, preserved so a rerun is comparable. */
-export const intentRequestSchema = z.object({
-  text: z.string().trim().min(3).max(280),
-  successCriteria: z
-    .array(z.string().trim().min(1).max(200))
-    .max(6)
-    .default([]),
+export const layerIdSchema = z.enum(["access", "content", "entity", "agent"]);
+export const checkStatusSchema = z.enum(["pass", "warn", "fail", "na"]);
+
+export const fixSchema = z.object({
+  summary: z.string(),
+  steps: z.array(z.string()).default([]),
+  /** A ready-to-paste artifact: robots rules, JSON-LD, an llms.txt, markup. */
+  code: z.string().optional(),
+  language: z.string().optional(),
+  file: z.string().optional(),
 });
 
 export const checkSchema = z.object({
   id: z.string(),
-  dimension: dimensionIdSchema,
+  layer: layerIdSchema,
   label: z.string(),
-  status: z.enum(["pass", "fail", "na"]),
-  value: z.number().min(0).max(1),
+  status: checkStatusSchema,
   weight: z.number().positive(),
-  evidenceIds: z.array(z.string()),
-  limitation: z.string().optional(),
+  earned: z.number().min(0),
+  /** What was actually observed, in plain words. */
+  found: z.string(),
+  /** Why an answer engine cares. */
+  why: z.string(),
+  urls: z.array(z.string()).default([]),
+  fix: fixSchema.nullable().default(null),
 });
-export const metricSchema = z.object({
-  dimension: dimensionIdSchema.or(z.literal("overall")),
-  score: z.number().min(0).max(100).nullable(),
+
+export const layerSchema = z.object({
+  id: layerIdSchema,
+  label: z.string(),
+  question: z.string(),
   earned: z.number(),
-  denominator: z.number(),
-  applied: z.array(checkSchema),
-  notApplicable: z.array(checkSchema),
-  calculation: z.string(),
-  scoringVersion: z.literal("spectra-v0.1"),
-  limitations: z.array(z.string()),
+  possible: z.number(),
+  score: z.number().nullable(),
 });
-export const groundingSourceSchema = z.object({
-  uri: z.string().url(),
+
+export const readinessSchema = z.object({
+  score: z.number().min(0).max(100),
+  grade: z.enum(["A", "B", "C", "D", "F"]),
+  layers: z.array(layerSchema),
+  checks: z.array(checkSchema),
+});
+
+export const profileSchema = z.object({
+  brand: z.string(),
+  aliases: z.array(z.string()).default([]),
+  category: z.string(),
+  description: z.string(),
+  audience: z.string().default(""),
+  market: z.string().default(""),
+  facts: z.array(z.string()).default([]),
+});
+
+export const sourceSchema = z.object({
+  uri: z.string(),
   title: z.string().default(""),
+  domain: z.string().default(""),
 });
-export const retrievalSchema = z.object({
+
+export const promptKindSchema = z.enum(["custom", "category", "branded"]);
+export const engineSchema = z.enum(["gemini_search", "gemini_model"]);
+
+export const promptResultSchema = z.object({
   id: z.string(),
-  claimId: z.string().optional(),
-  intentId: z.string().optional(),
-  query: z.string(),
-  variantIndex: z.number().int().default(0),
-  mode: z.enum(["direct", "search_grounded"]),
-  answer: z.string().nullable(),
-  correct: z.boolean().nullable(),
-  reason: z.string().optional(),
-  evidenceIds: z.array(z.string()),
-  groundingSources: z.array(groundingSourceSchema).default([]),
-  groundingMetadata: z.unknown().optional(),
-  status: z.enum(["passed", "failed", "not_run", "error", "unavailable"]),
+  text: z.string(),
+  kind: promptKindSchema,
+  engine: engineSchema,
+  status: z.enum(["ok", "error", "skipped"]),
+  answer: z.string().default(""),
+  mentioned: z.boolean().default(false),
+  /** 1-based rank among the brands the answer recommends, when it lists any. */
+  position: z.number().int().positive().nullable().default(null),
+  cited: z.boolean().default(false),
+  competitors: z.array(z.string()).default([]),
+  sentiment: z
+    .enum(["positive", "neutral", "negative"])
+    .nullable()
+    .default(null),
+  inaccuracies: z.array(z.string()).default([]),
+  sources: z.array(sourceSchema).default([]),
   error: z.string().optional(),
   durationMs: z.number().default(0),
 });
-export const stabilitySchema = z.object({
-  claimId: z.string(),
-  mode: z.enum(["direct", "search_grounded"]),
-  successfulVariants: z.number(),
-  failedVariants: z.number(),
-  unavailableVariants: z.number(),
-  stabilityRatio: z.number().min(0).max(1).nullable(),
-  contradictoryAnswers: z.array(z.string()),
-  uncertainty: z.string(),
-});
-export const issueSchema = z.object({
-  id: z.string(),
-  type: z.string(),
-  severity: z.enum(["low", "medium", "high", "critical"]),
-  title: z.string(),
-  description: z.string(),
-  affectedEntities: z.array(z.string()),
-  affectedClaims: z.array(z.string()),
-  evidenceIds: z.array(z.string()),
-  likelyCause: z.string(),
-  recommendedFix: z.string(),
-  confidence: z.number().min(0).max(1),
-});
-/**
- * A fix an operator can hand to a coding agent. `scoreImpact` is exact rather
- * than estimated: scoring is deterministic, so the recoverable points are
- * computed by replaying the score with the blocked checks passing.
- */
-export const recommendationSchema = z.object({
-  id: z.string(),
-  issueId: z.string(),
-  whatFailed: z.string(),
-  where: z.string(),
-  evidenceIds: z.array(z.string()),
-  change: z.string(),
-  rationale: z.string(),
-  severity: z.enum(["low", "medium", "high", "critical"]).default("medium"),
-  dimension: dimensionIdSchema.nullable().default(null),
-  checkIds: z.array(z.string()).default([]),
-  scoreImpact: z.number().default(0),
-  missingFacts: z.array(z.string()).default([]),
-  pageUrls: z.array(z.string()).default([]),
-  steps: z.array(z.string()).default([]),
-  verify: z.string().default(""),
+
+export const visibilitySchema = z.object({
+  score: z.number().min(0).max(100).nullable(),
+  engine: engineSchema,
+  engineNote: z.string().default(""),
+  prompts: z.array(promptResultSchema),
+  measured: z.number().int(),
+  mentions: z.number().int(),
+  categoryMeasured: z.number().int(),
+  categoryMentions: z.number().int(),
+  citations: z.number().int(),
+  groundedMeasured: z.number().int(),
+  averagePosition: z.number().nullable(),
+  shareOfVoice: z.array(
+    z.object({
+      name: z.string(),
+      mentions: z.number().int(),
+      brand: z.boolean(),
+    }),
+  ),
+  citedDomains: z.array(
+    z.object({
+      domain: z.string(),
+      count: z.number().int(),
+      own: z.boolean(),
+    }),
+  ),
 });
 
-export const modelRunSchema = z.object({
+export const actionSchema = z.object({
   id: z.string(),
-  provider: z.string(),
-  model: z.string(),
-  purpose: z.string(),
-  status: z.enum(["success", "error", "skipped"]),
-  durationMs: z.number(),
-  inputTokens: z.number().optional(),
-  outputTokens: z.number().optional(),
-  groundingEnabled: z.boolean().default(false),
-  error: z.string().optional(),
+  source: z.enum(["readiness", "visibility"]),
+  checkId: z.string().nullable().default(null),
+  title: z.string(),
+  priority: z.enum(["high", "medium", "low"]),
+  /** Exact readiness points recovered when this passes; 0 for visibility work. */
+  points: z.number().default(0),
+  detail: z.string(),
+  fix: fixSchema,
 });
+
+export const intentRequestSchema = z.object({
+  text: z.string().trim().min(3).max(280),
+});
+
+export const auditStatusSchema = z.enum([
+  "queued",
+  "scanning",
+  "profiling",
+  "asking",
+  "analysing",
+  "complete",
+  "partial",
+  "failed",
+]);
+
 export const auditSchema = z.object({
   id: z.string(),
-  target: z.string().url(),
-  status: z.enum([
-    "idle",
-    "queued",
-    "validating",
-    "crawling",
-    "extracting",
-    "analyzing",
-    "classifying",
-    "mapping",
-    "evaluating",
-    "retrieving",
-    "intents",
-    "scoring",
-    "diagnosing",
-    "complete",
-    "partial_failure",
-    "fatal_failure",
-  ]),
-  currentStage: z.string().default("idle"),
+  version: z.literal(SCHEMA_VERSION),
+  target: z.string(),
+  host: z.string(),
+  status: auditStatusSchema,
+  stage: z.string().default(""),
   createdAt: z.string(),
   completedAt: z.string().nullable(),
-  scoringVersion: z.literal("spectra-v0.1"),
-  model: z.string().default(""),
-  crawl: crawlOutputSchema.nullable(),
-  evidence: z.array(evidenceSchema),
-  analysis: siteAnalysisSchema.nullable(),
-  graph: semanticGraphSchema.nullable(),
-  contract: contractSchema.nullable(),
-  intents: z.array(intentSchema).default([]),
-  survival: z.array(survivalSchema),
-  stability: z.array(stabilitySchema).default([]),
-  retrievals: z.array(retrievalSchema),
-  metrics: z.array(metricSchema),
-  issues: z.array(issueSchema),
-  recommendations: z.array(recommendationSchema),
-  modelRuns: z.array(modelRunSchema),
-  warnings: z.array(z.string()),
+  durationMs: z.number().default(0),
+  model: z.string(),
+  customPrompts: z.array(z.string()).default([]),
+  scan: scanSchema.nullable(),
+  readiness: readinessSchema.nullable(),
+  profile: profileSchema.nullable(),
+  visibility: visibilitySchema.nullable(),
+  actions: z.array(actionSchema).default([]),
+  llmsTxt: z.string().nullable().default(null),
+  warnings: z.array(z.string()).default([]),
+  error: z.string().nullable().default(null),
 });
 
-export type Audit = z.infer<typeof auditSchema>;
-export type CrawlOutput = z.infer<typeof crawlOutputSchema>;
-export type SourceEvidence = z.infer<typeof evidenceSchema>;
-export type SiteAnalysis = z.infer<typeof siteAnalysisSchema>;
-export type SemanticGraph = z.infer<typeof semanticGraphSchema>;
-export type EvaluationContract = z.infer<typeof contractSchema>;
+export type PageSignals = z.infer<typeof pageSignalsSchema>;
+export type FileProbe = z.infer<typeof fileProbeSchema>;
+export type BotProbe = z.infer<typeof botProbeSchema>;
+export type Scan = z.infer<typeof scanSchema>;
+export type LayerId = z.infer<typeof layerIdSchema>;
+export type CheckStatus = z.infer<typeof checkStatusSchema>;
+export type Fix = z.infer<typeof fixSchema>;
 export type Check = z.infer<typeof checkSchema>;
-export type Metric = z.infer<typeof metricSchema>;
-export type RetrievalResult = z.infer<typeof retrievalSchema>;
-export type Intent = z.infer<typeof intentSchema>;
+export type Layer = z.infer<typeof layerSchema>;
+export type Readiness = z.infer<typeof readinessSchema>;
+export type Profile = z.infer<typeof profileSchema>;
+export type Source = z.infer<typeof sourceSchema>;
+export type PromptKind = z.infer<typeof promptKindSchema>;
+export type Engine = z.infer<typeof engineSchema>;
+export type PromptResult = z.infer<typeof promptResultSchema>;
+export type Visibility = z.infer<typeof visibilitySchema>;
+export type Action = z.infer<typeof actionSchema>;
 export type IntentRequest = z.infer<typeof intentRequestSchema>;
-export type ModelRun = z.infer<typeof modelRunSchema>;
-export type Recommendation = z.infer<typeof recommendationSchema>;
+export type AuditStatus = z.infer<typeof auditStatusSchema>;
+export type Audit = z.infer<typeof auditSchema>;
