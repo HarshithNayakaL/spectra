@@ -17,8 +17,10 @@ import {
 import { buildFixPrompt, estimateTokens } from "@spectra/evaluation";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
+  ArrowRight02Icon,
   ArrowUpRight01Icon,
   GoogleGeminiIcon,
+  Loading03Icon,
 } from "@hugeicons/core-free-icons";
 import {
   FloatingCloudee,
@@ -444,7 +446,14 @@ function Landing({
             </div>
 
             <button className="runButton" disabled={running}>
-              {running ? "Auditing…" : "Run audit"}
+              <span>{running ? "Auditing" : "Run audit"}</span>
+              <HugeiconsIcon
+                className={running ? "runIcon spin" : "runIcon"}
+                icon={running ? Loading03Icon : ArrowRight02Icon}
+                size={20}
+                strokeWidth={2}
+                aria-hidden="true"
+              />
             </button>
             <p className="analyzeNote">
               Takes 1 to 3 minutes. Public sites only. No account needed.
