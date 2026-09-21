@@ -160,14 +160,16 @@ export function summariseVisibility(
       entry.mentions += 1;
       counts.set(key, entry);
     }
+  // The brand is always in the chart: being absent from it is the finding.
   const shareOfVoice = [
     { name: matcher.brand, mentions: unbrandedMentions, brand: true },
-    ...[...counts.values()].map((entry) => ({ ...entry, brand: false })),
-  ]
-    .sort(
-      (a, b) => b.mentions - a.mentions || Number(b.brand) - Number(a.brand),
-    )
-    .slice(0, 9);
+    ...[...counts.values()]
+      .sort((a, b) => b.mentions - a.mentions)
+      .slice(0, 8)
+      .map((entry) => ({ ...entry, brand: false })),
+  ].sort(
+    (a, b) => b.mentions - a.mentions || Number(b.brand) - Number(a.brand),
+  );
 
   const domains = new Map<string, number>();
   for (const prompt of grounded)

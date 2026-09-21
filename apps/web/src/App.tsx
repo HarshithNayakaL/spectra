@@ -218,7 +218,8 @@ export function App() {
             strokeWidth={1.9}
             aria-hidden="true"
           />
-          Measured with Google Gemini + Search
+          <span className="topLong">Measured with Google Gemini + Search</span>
+          <span className="topShort">Gemini + Search</span>
         </span>
       </header>
       <main id="main">
@@ -334,9 +335,7 @@ function Landing({
             <span>AI search visibility audit</span>
           </div>
           <h1 className="heroType">
-            Are you in
-            <br />
-            the answer?
+            <span>Are you in</span> <span>the answer?</span>
           </h1>
           <p className="heroLede">
             Type the questions your buyers ask AI. SPECTRA asks Gemini with live
@@ -379,7 +378,7 @@ function Landing({
                       maxLength={280}
                       placeholder={
                         index === 0
-                          ? "Best B2B contact data provider for startups"
+                          ? "Best B2B data provider for startups"
                           : "Cheaper alternative to ZoomInfo"
                       }
                       value={value}
@@ -495,20 +494,13 @@ function Landing({
               files. Deterministic: the same site gets the same score, and every
               point is traceable to what we fetched.
             </p>
+            <p className="statProof">
+              <b>Real answers, not a simulation.</b> We never hand Gemini your
+              pages and ask if it understood them. We ask what a buyer would
+              ask, exactly as they would, and read what comes back.
+            </p>
           </div>
         )}
-
-        <div
-          className="cell cellProof reveal"
-          style={{ "--d": "90ms" } as never}
-        >
-          <b>Real answers, not a simulation</b>
-          <p>
-            We never hand Gemini your pages and ask if it understood them. We
-            ask it what a buyer would ask, exactly as they would, and read what
-            comes back.
-          </p>
-        </div>
 
         {error && (
           <div className="cell cellError" role="alert">
@@ -526,19 +518,23 @@ function Landing({
           </div>
         )}
 
-        {STEPS.map((step, index) => (
-          <div
-            className="cell cellStep reveal"
-            key={step.name}
-            style={{ "--d": `${130 + index * 40}ms` } as never}
-          >
-            <span className="stageIndex">
-              {String(index + 1).padStart(2, "0")}
-            </span>
-            <b className="stageName">{step.name}</b>
-            <p className="stageLoss">{step.detail}</p>
-          </div>
-        ))}
+        <div
+          className="cell cellSteps reveal"
+          style={{ "--d": "130ms" } as never}
+        >
+          <h2 className="stepsTitle">How the audit works</h2>
+          <ol className="steps4">
+            {STEPS.map((step, index) => (
+              <li key={step.name}>
+                <span className="stageIndex">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <b className="stageName">{step.name}</b>
+                <p className="stageLoss">{step.detail}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
       </div>
     </section>
   );
@@ -575,6 +571,17 @@ function Report({
   const v = audit.visibility;
   const r = audit.readiness;
   const active = useActiveSection(SECTIONS.map((s) => s.id));
+  useEffect(() => {
+    const tab = document.querySelector<HTMLElement>(
+      `.railNav a[href="#${active}"]`,
+    );
+    const bar = tab?.closest<HTMLElement>(".rail");
+    if (tab && bar && bar.scrollWidth > bar.clientWidth)
+      bar.scrollTo({
+        left: tab.offsetLeft - bar.clientWidth / 2 + tab.offsetWidth / 2,
+        behavior: "smooth",
+      });
+  }, [active]);
   const live = !TERMINAL.has(audit.status);
   const brand = audit.profile?.brand ?? audit.host;
 
@@ -599,6 +606,18 @@ function Report({
       </section>
     );
 
+  const rival = v?.shareOfVoice.find((s) => !s.brand && s.mentions > 0);
+  const verdict =
+    v && v.categoryMeasured
+      ? `Gemini named ${brand} in ${v.categoryMentions} of ${v.categoryMeasured} buyer questions.${rival ? ` ${rival.name} was named in ${rival.mentions}.` : ""}`
+      : r
+        ? `AI readiness ${r.score}/100. Visibility was not measured on this run.`
+        : "";
+  const notes = [
+    ...(v?.engine === "gemini_model" ? [v.engineNote] : []),
+    ...audit.warnings.map(tidyWarning),
+  ];
+
   return (
     <div className="report">
       <aside className="rail" aria-label="Report sections">
@@ -621,36 +640,25 @@ function Report({
       <div className="sheet">
         <div className="grid" id="overview">
           <header className="card cardHead span8">
-            <div className="kicker">
-              <span>{audit.profile?.category || "Audit"}</span>
+            <p className="eyebrow">
               <span>{audit.host}</span>
-            </div>
+              {audit.profile?.category && <span>{audit.profile.category}</span>}
+            </p>
             <h1>{brand}</h1>
+            {verdict && <p className="verdictLine">{verdict}</p>}
             {audit.profile?.description && (
               <p className="lede">{audit.profile.description}</p>
             )}
-            <dl className="metaRow">
-              <div>
-                <dt>Pages read</dt>
-                <dd>{audit.scan?.pages.length ?? 0}</dd>
-              </div>
-              <div>
-                <dt>Questions asked</dt>
-                <dd>{v?.measured ?? 0}</dd>
-              </div>
-              <div>
-                <dt>Model</dt>
-                <dd>{audit.model}</dd>
-              </div>
-              <div>
-                <dt>Took</dt>
-                <dd>
-                  {audit.durationMs
-                    ? `${Math.round(audit.durationMs / 1000)}s`
-                    : "running"}
-                </dd>
-              </div>
-            </dl>
+            <p className="metaLine mono">
+              <span>{audit.scan?.pages.length ?? 0} pages</span>
+              <span>{v?.measured ?? 0} questions</span>
+              <span>
+                {audit.durationMs
+                  ? `${Math.round(audit.durationMs / 1000)}s`
+                  : "running"}
+              </span>
+              <span>{audit.model}</span>
+            </p>
             <div className="headActions">
               <FixAllButton audit={audit} />
               {audit.llmsTxt && (
@@ -721,7 +729,7 @@ function Report({
                   {r.score}
                   <small>/100</small>
                 </span>
-                <span className={`grade grade${r.grade}`}>{r.grade}</span>
+                <span className={`grade grade${r.grade}`}>Grade {r.grade}</span>
               </div>
               <div className="layers">
                 {r.layers.map((layer) => (
@@ -746,16 +754,18 @@ function Report({
             </section>
           )}
 
-          {(audit.warnings.length > 0 || v?.engine === "gemini_model") && (
-            <section className="card span12 notes">
-              <b>Notes on this run</b>
+          {notes.length > 0 && (
+            <details className="card span12 notes">
+              <summary>
+                <b>Notes on this run</b>
+                <span className="mono">{notes.length}</span>
+              </summary>
               <ul>
-                {v?.engine === "gemini_model" && <li>{v.engineNote}</li>}
-                {audit.warnings.map((w) => (
-                  <li key={w}>{w}</li>
+                {notes.map((note) => (
+                  <li key={note}>{note}</li>
                 ))}
               </ul>
-            </section>
+            </details>
           )}
         </div>
 
@@ -765,8 +775,32 @@ function Report({
         <Checks audit={audit} />
         <Pages audit={audit} />
       </div>
+
+      {/* Phones: the one action that matters stays under the thumb. */}
+      {audit.actions.length > 0 && (
+        <div className="mobileBar">
+          <FixAllButton audit={audit} short />
+          {audit.llmsTxt && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => download("llms.txt", audit.llmsTxt!)}
+            >
+              llms.txt
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+/** Warnings are written for logs; on screen, drop the host and jargon. */
+function tidyWarning(text: string) {
+  return text
+    .replace(/https?:\/\/[^/\s]+(\/[^\s:]*)?/g, (_, path) => path || "/")
+    .replace(/The operation was aborted due to timeout/gi, "timed out")
+    .replace(/Timed out after 10s/gi, "timed out");
 }
 
 function Questions({ audit }: { audit: Audit }) {
@@ -908,11 +942,14 @@ function QuestionRow({
 
 /** Minimal Markdown: headings, bullets, numbered items and bold. */
 function AnswerText({ text }: { text: string }) {
+  const [full, setFull] = useState(false);
   const blocks = text
     .split(/\r?\n/)
     .filter((line) => line.trim() && !/^\s*([-*_])\1{2,}\s*$/.test(line));
+  // Long answers are previewed; the verdict above already says what matters.
+  const long = text.length > 900;
   return (
-    <div className="answer">
+    <div className={`answer ${long && !full ? "clamped" : ""}`}>
       {blocks.map((line, i) => {
         const bullet = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)$/);
         const heading = line.match(/^\s*#{1,6}\s+(.*)$/);
@@ -926,6 +963,16 @@ function AnswerText({ text }: { text: string }) {
           );
         return <p key={i}>{inline(line)}</p>;
       })}
+      {long && (
+        <button
+          type="button"
+          className="answerToggle"
+          onClick={() => setFull(!full)}
+          aria-expanded={full}
+        >
+          {full ? "Show less" : "Read the full answer"}
+        </button>
+      )}
     </div>
   );
 }
@@ -946,6 +993,17 @@ function Competitors({ audit }: { audit: Audit }) {
   const v = audit.visibility;
   if (!v || !v.measured) return null;
   const top = Math.max(1, ...v.shareOfVoice.map((s) => s.mentions));
+  // Reports saved before the brand was pinned can lack its row.
+  const sov = v.shareOfVoice.some((s) => s.brand)
+    ? v.shareOfVoice
+    : [
+        ...v.shareOfVoice.slice(0, 8),
+        {
+          name: audit.profile?.brand ?? audit.host,
+          mentions: v.categoryMentions,
+          brand: true,
+        },
+      ];
   return (
     <section className="block" id="competitors">
       <div className="blockHead">
@@ -962,7 +1020,7 @@ function Competitors({ audit }: { audit: Audit }) {
             <p className="muted">No companies were named in these answers.</p>
           ) : (
             <ul className="sov">
-              {v.shareOfVoice.map((s) => (
+              {sov.map((s) => (
                 <li key={s.name} className={s.brand ? "you" : ""}>
                   <span className="sovName">
                     {s.name}
@@ -1008,6 +1066,8 @@ function Competitors({ audit }: { audit: Audit }) {
 
 function Fixes({ audit }: { audit: Audit }) {
   const [open, setOpen] = useState<string | null>(audit.actions[0]?.id ?? null);
+  const [all, setAll] = useState(false);
+  const shown = all ? audit.actions : audit.actions.slice(0, 5);
   return (
     <section className="block" id="fixes">
       <div className="blockHead">
@@ -1024,7 +1084,7 @@ function Fixes({ audit }: { audit: Audit }) {
         />
       ) : (
         <div className="fixList">
-          {audit.actions.map((a, i) => (
+          {shown.map((a, i) => (
             <FixRow
               key={a.id}
               index={i}
@@ -1034,6 +1094,15 @@ function Fixes({ audit }: { audit: Audit }) {
               toggle={() => setOpen(open === a.id ? null : a.id)}
             />
           ))}
+          {audit.actions.length > shown.length && (
+            <button
+              type="button"
+              className="btn showMore"
+              onClick={() => setAll(true)}
+            >
+              Show {audit.actions.length - shown.length} more fixes
+            </button>
+          )}
         </div>
       )}
     </section>
@@ -1225,22 +1294,32 @@ function Pages({ audit }: { audit: Audit }) {
             <tbody>
               {pages.map((p) => (
                 <tr key={p.url}>
-                  <td>
+                  <td data-label="Page">
                     <a href={p.url} target="_blank" rel="noreferrer noopener">
                       {pathOf(p.url)}
                     </a>
                   </td>
-                  <td className={`num ${p.appShell ? "bad" : ""}`}>
+                  <td
+                    data-label="Words"
+                    className={`num ${p.appShell ? "bad" : ""}`}
+                  >
                     {p.words.toLocaleString("en")}
                   </td>
-                  <td className={p.title ? "" : "bad"}>
+                  <td data-label="Title" className={p.title ? "" : "bad"}>
                     {p.title || "missing"}
                   </td>
-                  <td className={p.description ? "ok" : "bad"}>
+                  <td
+                    data-label="Description"
+                    className={p.description ? "ok" : "bad"}
+                  >
                     {p.description ? "yes" : "missing"}
                   </td>
-                  <td>{p.jsonLdTypes.slice(0, 4).join(", ") || "none"}</td>
-                  <td className="num">{(p.ms / 1000).toFixed(1)}s</td>
+                  <td data-label="Schema">
+                    {p.jsonLdTypes.slice(0, 4).join(", ") || "none"}
+                  </td>
+                  <td data-label="Load" className="num">
+                    {(p.ms / 1000).toFixed(1)}s
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1253,13 +1332,17 @@ function Pages({ audit }: { audit: Audit }) {
 
 /* ================================================================ parts */
 
-function FixAllButton({ audit }: { audit: Audit }) {
+function FixAllButton({ audit, short }: { audit: Audit; short?: boolean }) {
   const prompt = useMemo(() => buildFixPrompt(audit), [audit]);
   if (!audit.actions.length) return null;
   return (
     <CopyButton
       primary
-      label={`Copy fix prompt (${audit.actions.length} tasks, ~${Math.round(estimateTokens(prompt) / 100) / 10}k tokens)`}
+      label={
+        short
+          ? `Copy fix prompt · ${audit.actions.length} tasks`
+          : `Copy fix prompt (${audit.actions.length} tasks, ~${Math.round(estimateTokens(prompt) / 100) / 10}k tokens)`
+      }
       text={() => prompt}
     />
   );

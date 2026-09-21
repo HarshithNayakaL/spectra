@@ -1880,3 +1880,508 @@ svg {
     scroll-behavior: auto !important;
   }
 }
+
+/* ============================================================
+   Flow fixes: components that were only ever laid out wide
+   ============================================================ */
+.topShort {
+  display: none;
+}
+.runButton {
+  min-height: 52px;
+  padding: 0 20px;
+  border: 1px solid var(--ink);
+  color: var(--paper);
+  background: var(--ink);
+  font: 600 var(--t-lead) / 1 var(--sans);
+  cursor: pointer;
+  transition:
+    opacity var(--quick) var(--ease),
+    transform var(--quick) var(--ease);
+}
+.runButton:hover:not(:disabled) {
+  opacity: 0.9;
+}
+.runButton:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.runButton:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.rowAdd {
+  min-height: 40px;
+  cursor: pointer;
+}
+.heroType span {
+  display: inline-block;
+}
+
+.cellSteps {
+  grid-column: span 12;
+}
+.stepsTitle {
+  font-family: var(--display);
+  font-size: clamp(1.5rem, 2.6vw, 2rem);
+  font-weight: 700;
+  font-variation-settings: "ROND" 24;
+}
+.steps4 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 24px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.steps4 li {
+  display: flex;
+  flex-direction: column;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+}
+
+/* Report head */
+.eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0 0 12px;
+  color: var(--ink-3);
+  font: 600 var(--t-micro) / 1.4 var(--mono);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.eyebrow span + span::before {
+  content: "·";
+  margin-right: 14px;
+}
+.verdictLine {
+  max-width: 44ch;
+  margin: 16px 0 0;
+  font-size: var(--t-h3);
+  font-weight: 600;
+  line-height: 1.35;
+  text-wrap: balance;
+}
+.lede {
+  font-size: var(--t-body);
+}
+.metaLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 16px 0 0;
+  color: var(--ink-3);
+  font-size: var(--t-data);
+}
+.notes summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 24px;
+  list-style: none;
+  cursor: pointer;
+}
+.notes summary::-webkit-details-marker {
+  display: none;
+}
+.notes summary::after {
+  content: "+";
+  font: 500 var(--t-lead) / 1 var(--mono);
+}
+.notes[open] summary::after {
+  content: "−";
+}
+.notes summary .mono {
+  margin-left: auto;
+  color: var(--ink-3);
+}
+
+/* Long answers: a preview, then the rest on request. */
+.answer.clamped {
+  position: relative;
+  max-height: 22em;
+  overflow: hidden;
+}
+.answer.clamped::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 7em;
+  background: linear-gradient(transparent, var(--field) 70%);
+  pointer-events: none;
+}
+.answerToggle {
+  position: relative;
+  z-index: 1;
+  min-height: 40px;
+  margin-top: 6px;
+  padding: 0 14px;
+  border: 1px solid var(--card-edge);
+  border-radius: 10px;
+  background: var(--paper);
+  font-size: var(--t-small);
+  font-weight: 600;
+  cursor: pointer;
+}
+.answer.clamped .answerToggle {
+  position: absolute;
+  bottom: 12px;
+  left: 18px;
+  margin: 0;
+}
+.showMore {
+  justify-self: start;
+}
+
+/* Text that carries URLs or model output must be allowed to break. */
+.found,
+.checkFound,
+.notes li,
+.qText,
+.qRivals,
+.answer,
+.lede,
+.verdictLine,
+.steps li,
+.checkDetail,
+.fixTitle {
+  overflow-wrap: anywhere;
+}
+
+.mobileBar {
+  display: none;
+}
+
+/* ------------------------------------------------------ phones */
+@media (width < 40rem) {
+  :root {
+    --t-micro: 0.75rem;
+  }
+  .top {
+    padding-inline: max(16px, env(safe-area-inset-left));
+  }
+  .topMeta {
+    display: inline-flex;
+    font-size: var(--t-data);
+  }
+  .topLong {
+    display: none;
+  }
+  .topShort {
+    display: inline;
+  }
+
+  /* Landing */
+  .heroType {
+    font-size: min(11.6vw, 3.5rem);
+    line-height: 1;
+  }
+  .heroLede {
+    margin-bottom: 24px;
+  }
+  .fieldRow label {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+    line-height: 1.3;
+  }
+  .field.fieldSelect {
+    flex-direction: row;
+  }
+  .field input,
+  .fieldSelect select {
+    font-size: 1rem;
+  }
+  .rowDrop {
+    width: 48px;
+  }
+  .cellSteps {
+    padding: 22px;
+  }
+  .steps4 {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .steps4 li {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr);
+    column-gap: 10px;
+    padding: 14px 0;
+  }
+  .steps4 li .stageIndex {
+    grid-row: span 2;
+    padding-top: 2px;
+  }
+  .steps4 li .stageLoss {
+    margin-top: 4px;
+  }
+
+  /* Report */
+  .sheet {
+    padding: 14px 12px calc(96px + env(safe-area-inset-bottom));
+  }
+  .card {
+    padding: 18px;
+    border-radius: 16px;
+  }
+  .cardHead h1 {
+    font-size: min(11vw, 2.75rem);
+  }
+  .verdictLine {
+    font-size: 1.0625rem;
+  }
+  .headActions .btn.primary {
+    display: none;
+  }
+  .headActions .btn {
+    flex: 1 1 0;
+    min-height: 44px;
+  }
+  .scoreBig {
+    font-size: 4.75rem;
+  }
+  .readinessScore {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 10px 14px;
+  }
+  .readinessScore .scoreLabel {
+    flex-basis: 100%;
+  }
+  .scoreMid {
+    font-size: 2.75rem;
+  }
+  .layers {
+    gap: 14px;
+  }
+  .blockHead {
+    margin-bottom: 14px;
+  }
+  .blockHead h2 {
+    font-size: 1.625rem;
+  }
+
+  .qMain,
+  .fixMain {
+    padding: 14px 16px;
+  }
+  .qDetail,
+  .fixDetail {
+    padding: 2px 16px 16px;
+  }
+  .answer {
+    margin-inline: -4px;
+    padding: 14px;
+  }
+  .answer p.nested {
+    padding-left: 24px;
+  }
+
+  /* Priority and gain on one line, the task below at full width. */
+  .fixMain {
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+      "prio gain"
+      "title title";
+    gap: 10px 12px;
+  }
+  .fixMain .prio {
+    grid-area: prio;
+  }
+  .fixMain .fixGain {
+    grid-area: gain;
+    grid-column: auto;
+    justify-self: end;
+  }
+  .fixMain .fixTitle {
+    grid-area: title;
+  }
+  .code pre {
+    max-height: 300px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .sov li {
+    grid-template-columns: minmax(0, 1fr) 72px 34px;
+    gap: 10px;
+  }
+
+  /* The pages table becomes one card per page. */
+  .tableCard {
+    padding: 0;
+    background: none;
+    border: 0;
+    box-shadow: none;
+  }
+  .tableCard::before {
+    display: none;
+  }
+  .pageTable thead {
+    display: none;
+  }
+  .pageTable,
+  .pageTable tbody {
+    display: block;
+  }
+  .pageTable tr {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px 12px;
+    margin-bottom: 10px;
+    padding: 14px 16px;
+    border: 1px solid var(--card-edge);
+    border-radius: 14px;
+    background: var(--paper);
+  }
+  .pageTable td {
+    display: block;
+    padding: 0;
+    border: 0;
+    text-align: left !important;
+  }
+  .pageTable td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 3px;
+    color: var(--ink-3);
+    font: 500 var(--t-micro) / 1.2 var(--mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .pageTable td[data-label="Page"],
+  .pageTable td[data-label="Title"],
+  .pageTable td[data-label="Schema"] {
+    grid-column: 1 / -1;
+  }
+  .pageTable td[data-label="Page"]::before {
+    display: none;
+  }
+  .pageTable td:nth-child(3) {
+    max-width: none;
+  }
+  .pageTable a {
+    font-size: var(--t-small);
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .mobileBar {
+    position: fixed;
+    z-index: var(--z-bar);
+    inset: auto 0 0;
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--card-edge);
+    background: color-mix(in oklch, var(--ground) 88%, transparent);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+  .mobileBar .btn {
+    min-height: 48px;
+  }
+  .mobileBar .btn.primary {
+    flex: 1;
+  }
+
+  /* Cloudee docks in the corner on phones instead of drifting over text. */
+  .cloudee {
+    --size: 58px;
+    top: auto !important;
+    left: auto !important;
+    right: 10px;
+    bottom: calc(18px + env(safe-area-inset-bottom));
+    margin: 0 !important;
+    animation: bobDock 3.2s ease-in-out infinite;
+  }
+  body:has(.mobileBar) .cloudee {
+    bottom: calc(82px + env(safe-area-inset-bottom));
+  }
+  .cloudeeTag {
+    display: none;
+  }
+}
+@keyframes bobDock {
+  50% {
+    translate: 0 -6px;
+  }
+}
+@media (pointer: coarse) {
+  .btn,
+  .codeHead .btn {
+    min-height: 44px;
+  }
+  .qMain,
+  .fixMain {
+    min-height: 56px;
+  }
+}
+@media (width < 40rem) {
+  .pageTable td[data-label="Page"] a {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    margin: -8px 0;
+  }
+  .notes summary {
+    min-height: 44px;
+    margin: -10px 0;
+  }
+  .brand {
+    min-height: 44px;
+  }
+}
+@media (width < 40rem) {
+  .eyebrow {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .eyebrow span + span::before {
+    content: none;
+  }
+}
+
+/* Landing composition: hero left; the proof and the method fill the right
+   column instead of two cards stretched around empty space. */
+.cellStat {
+  justify-content: flex-start;
+}
+.statProof {
+  margin-top: 18px !important;
+  padding-top: 16px;
+  border-top: 1px solid color-mix(in oklch, currentColor 18%, transparent);
+}
+.cellSteps {
+  grid-column: span 5;
+}
+.cellSteps .steps4 {
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+.cellSteps .steps4 li {
+  padding: 16px 0;
+}
+.cellSteps .steps4 li:last-child {
+  padding-bottom: 0;
+}
+@media (width < 62rem) {
+  .cellStat,
+  .cellSteps {
+    grid-column: span 12;
+  }
+  .cellSteps .steps4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 24px;
+  }
+}
+@media (width < 40rem) {
+  .cellSteps .steps4 {
+    grid-template-columns: 1fr;
+  }
+  .cellSteps .steps4 li {
+    padding: 14px 0;
+  }
+}
