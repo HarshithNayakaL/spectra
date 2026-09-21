@@ -10,5 +10,9 @@ for (const name of [".env", "env"]) {
   if (existsSync(path)) loadEnvFile(path);
 }
 
+// Throwing here would take /api/health and /api/models down with it. The
+// pipeline already records an unconfigured model as a warning on the audit.
 if (process.env.NODE_ENV === "production" && !process.env.GEMINI_API_KEY)
-  throw new Error("GEMINI_API_KEY is required in production.");
+  console.warn(
+    "GEMINI_API_KEY is not set: audits will run crawl-only measurements.",
+  );

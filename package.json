@@ -16,10 +16,12 @@
     "format": "prettier --write \"apps/**/*.{ts,tsx,css,json,mjs}\" \"packages/**/*.{ts,json}\" \"*.{json,md}\" \"docs/**/*.md\"",
     "format:check": "prettier --check \"apps/**/*.{ts,tsx,css,json,mjs}\" \"packages/**/*.{ts,json}\" \"*.{json,md}\" \"docs/**/*.md\"",
     "crawler:test": "cargo test --manifest-path services/crawler/Cargo.toml",
-    "crawler:build": "cargo build --release --manifest-path services/crawler/Cargo.toml"
+    "crawler:build": "cargo build --release --manifest-path services/crawler/Cargo.toml",
+    "build:vercel": "node scripts/build-vercel.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
+    "esbuild": "^0.28.2",
     "prettier": "^3.9.6",
     "typescript": "^5.9.2"
   }

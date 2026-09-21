@@ -11,6 +11,10 @@ const CRAWLER_TIMEOUT_MS = 120_000;
 export async function crawl(
   url: string,
 ): Promise<{ output: CrawlOutput; fallback: boolean }> {
+  // Serverless functions cannot ship or spawn the Rust binary. The Node
+  // crawler carries the same SSRF rules and pins DNS, so it runs directly.
+  if (process.env.VERCEL && !process.env.SPECTRA_CRAWLER_BIN)
+    return { output: await crawlWithNode(url), fallback: true };
   const executable =
     process.platform === "win32" ? "spectra-crawler.exe" : "spectra-crawler";
   const configured = process.env.SPECTRA_CRAWLER_BIN;

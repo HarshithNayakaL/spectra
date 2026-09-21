@@ -54,6 +54,8 @@ export interface ModelProvider {
   ): Promise<Result<IntentVerdict>>;
 }
 export class GroundingUnavailableError extends Error {}
+/** The request could not finish before the caller's deadline. */
+export class DeadlineError extends Error {}
 /** A failure that will repeat identically on retry (bad key, bad request). */
 export class PermanentModelError extends Error {}
 
@@ -229,14 +231,32 @@ const graphResponseSchema = {
 export class GeminiProvider implements ModelProvider {
   readonly model: string;
   private nextRequestAt = 0;
+  // Serverless has a hard wall clock, so pacing and retries are tighter there.
   private readonly minimumInterval = Number(
-    process.env.GEMINI_MIN_REQUEST_INTERVAL_MS || 7000,
+    process.env.GEMINI_MIN_REQUEST_INTERVAL_MS ||
+      (process.env.VERCEL ? 1200 : 7000),
   );
+  private readonly maxAttempts = Math.max(
+    1,
+    Number(process.env.GEMINI_MAX_ATTEMPTS || (process.env.VERCEL ? 3 : 6)),
+  );
+  /** Epoch ms after which no request may start or keep waiting. */
+  private readonly deadline: number;
   constructor(
     private key: string,
-    model = process.env.GEMINI_MODEL || "gemini-3.8-flash",
+    model = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite",
+    options: { deadline?: number } = {},
   ) {
     this.model = model;
+    this.deadline = options.deadline ?? Number.POSITIVE_INFINITY;
+  }
+
+  /** Waits, but refuses to wait past the deadline. */
+  private async waitWithin(ms: number) {
+    if (ms <= 0) return;
+    if (Date.now() + ms > this.deadline - 1500)
+      throw new DeadlineError("Time budget reached before the model responded");
+    await delay(ms);
   }
 
   async analyzeSite(evidence: SourceEvidence[]) {
@@ -404,12 +424,19 @@ export class GeminiProvider implements ModelProvider {
 
   private async request(body: unknown, grounding: boolean): Promise<any> {
     let last: unknown;
-    const attempts = Math.max(1, Number(process.env.GEMINI_MAX_ATTEMPTS || 6));
+    const attempts = this.maxAttempts;
     for (let attempt = 0; attempt < attempts; attempt++) {
-      const wait = this.nextRequestAt - Date.now();
-      if (wait > 0) await delay(wait);
+      await this.waitWithin(this.nextRequestAt - Date.now());
+      const remaining = this.deadline - Date.now() - 1000;
+      if (remaining < 3000)
+        throw new DeadlineError(
+          "Time budget reached before the model responded",
+        );
       const controller = new AbortController(),
-        timer = setTimeout(() => controller.abort(), 45_000);
+        timer = setTimeout(
+          () => controller.abort(),
+          Math.min(45_000, remaining),
+        );
       try {
         const response = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`,
@@ -441,7 +468,7 @@ export class GeminiProvider implements ModelProvider {
             response.status === 429
               ? Math.min(60_000, 15_000 * 2 ** attempt)
               : Math.min(30_000, 2_000 * 2 ** attempt);
-          await delay(Math.max(retryAfterMs(response), backoff));
+          await this.waitWithin(Math.max(retryAfterMs(response), backoff));
           continue;
         }
         if (!response.ok) {
@@ -456,12 +483,13 @@ export class GeminiProvider implements ModelProvider {
       } catch (error) {
         if (
           error instanceof GroundingUnavailableError ||
-          error instanceof PermanentModelError
+          error instanceof PermanentModelError ||
+          error instanceof DeadlineError
         )
           throw error;
         last = error;
         if (attempt < attempts - 1)
-          await delay(Math.min(30_000, 2_000 * 2 ** attempt));
+          await this.waitWithin(Math.min(30_000, 2_000 * 2 ** attempt));
       } finally {
         this.nextRequestAt = Date.now() + this.minimumInterval;
         clearTimeout(timer);

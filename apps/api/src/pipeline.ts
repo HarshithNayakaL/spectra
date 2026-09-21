@@ -9,6 +9,7 @@ import {
 } from "@spectra/schemas";
 import { evaluate, normalize, selectContract } from "@spectra/evaluation";
 import {
+  DeadlineError,
   GeminiProvider,
   GroundingUnavailableError,
   type ModelProvider,
@@ -23,6 +24,22 @@ export type Progress = (
 ) => void;
 
 const MAX_INTENTS = 5;
+
+/** Raised when the remaining wall clock cannot fit the next stage. */
+class BudgetExhausted extends Error {}
+
+/**
+ * How long an audit may run. On serverless the function is killed at its
+ * maxDuration, so the budget stops early enough to score and save whatever
+ * was measured. Locally there is no ceiling.
+ */
+function timeBudgetMs(): number {
+  if (process.env.SPECTRA_TIME_BUDGET_MS)
+    return Number(process.env.SPECTRA_TIME_BUDGET_MS);
+  if (!process.env.VERCEL) return Number.POSITIVE_INFINITY;
+  const maxDuration = Number(process.env.SPECTRA_FUNCTION_MAX_DURATION || 300);
+  return Math.max(30, maxDuration - 40) * 1000;
+}
 const MAX_INTENT_VARIANTS = 4;
 
 const STAGE_PURPOSES: Record<string, string> = {
@@ -41,7 +58,13 @@ export async function runAudit(
 ): Promise<Audit> {
   const id = randomUUID(),
     model =
-      requestedModel || process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
+      requestedModel || process.env.GEMINI_MODEL || "gemini-3.1-flash-lite",
+    budgetMs = timeBudgetMs(),
+    deadline = Date.now() + budgetMs,
+    timeLeft = () => deadline - Date.now(),
+    ensureTime = (needMs: number, skipped: string) => {
+      if (timeLeft() < needMs) throw new BudgetExhausted(skipped);
+    };
   let target: string;
   try {
     target = normalizeTarget(rawTarget);
@@ -142,7 +165,7 @@ export async function runAudit(
           `${audit.intents.length} declared intent${audit.intents.length === 1 ? " was" : "s were"} recorded but not tested: intent completion needs a configured model.`,
         );
     } else {
-      const provider = new GeminiProvider(key, model);
+      const provider = new GeminiProvider(key, model, { deadline });
       try {
         await stage(
           "classifying",
@@ -171,12 +194,25 @@ export async function runAudit(
             "intents",
             `Testing whether ${targets.length} intent${targets.length === 1 ? "" : "s"} can be completed from site evidence`,
           );
-          for (const intent of targets) {
-            await measureIntent(audit, provider, intent, model, id);
+          for (const [index, intent] of targets.entries()) {
+            // Intents are the headline measurement, so they get the time first,
+            // but an intent that cannot finish is marked rather than started.
+            if (timeLeft() < 20_000) {
+              for (const rest of targets.slice(index)) {
+                rest.reason = "Skipped: the audit reached its time budget.";
+                rest.stages = intentStages(audit, rest);
+              }
+              audit.warnings.push(
+                `${targets.length - index} intent${targets.length - index === 1 ? " was" : "s were"} not tested because the audit reached its time budget.`,
+              );
+              break;
+            }
+            await measureIntent(audit, provider, intent, model, id, deadline);
             await saveAudit(audit);
           }
         }
 
+        ensureTime(45_000, "the semantic graph and retrieval checks");
         await stage(
           "mapping",
           "Gemini is extracting evidence-linked entities, relationships, and claims",
@@ -198,6 +234,7 @@ export async function runAudit(
         );
         audit.contract = selectContract(audit.analysis);
         await saveAudit(audit);
+        ensureTime(30_000, "the retrieval checks");
         await stage(
           "evaluating",
           "Gemini is generating retrieval questions from important claims",
@@ -224,13 +261,21 @@ export async function runAudit(
           "retrieving",
           `Running direct and Google-grounded evaluations for ${groups.reduce((n, g) => n + g.variants.length, 0)} query variants`,
         );
-        for (const group of groups) {
+        // One grounding failure is almost always a quota or availability wall,
+        // and retrying it per variant cost minutes of backoff each time.
+        let groundingOff = false;
+        let budgetHit = false;
+        retrieval: for (const group of groups) {
           const claim = audit.graph.claims.find(
             (item) => item.id === group.claimId,
           );
           if (!claim) continue;
           const expected = `${claim.subject} ${claim.predicate} ${claim.object}`;
           for (const [variantIndex, query] of group.variants.entries()) {
+            if (timeLeft() < 15_000) {
+              budgetHit = true;
+              break retrieval;
+            }
             try {
               const result = await provider.answerDirect(
                 query,
@@ -291,6 +336,21 @@ export async function runAudit(
                 ),
               );
             }
+            if (groundingOff) {
+              audit.retrievals.push({
+                ...failedRetrieval(
+                  claim.id,
+                  query,
+                  variantIndex,
+                  "search_grounded",
+                  claim.evidenceIds,
+                  "Skipped after an earlier grounded request failed in this audit.",
+                ),
+                status: "unavailable",
+              });
+              await saveAudit(audit);
+              continue;
+            }
             try {
               const grounded = await provider.answerGrounded(query);
               const judged = await provider.evaluateRetrievedAnswer(
@@ -339,8 +399,11 @@ export async function runAudit(
                 durationMs: grounded.durationMs,
               });
             } catch (error) {
+              groundingOff = true;
               const text = message(error),
-                unavailable = error instanceof GroundingUnavailableError;
+                unavailable =
+                  error instanceof GroundingUnavailableError ||
+                  error instanceof DeadlineError;
               audit.retrievals.push({
                 ...failedRetrieval(
                   claim.id,
@@ -367,21 +430,39 @@ export async function runAudit(
             await saveAudit(audit);
           }
         }
+        if (budgetHit)
+          audit.warnings.push(
+            "Some retrieval variants were skipped because the audit reached its time budget. Completed measurements are kept.",
+          );
       } catch (error) {
         const text = message(error);
-        audit.warnings.push(`Semantic pipeline failed: ${text}`);
-        audit.modelRuns.push(
-          run(
-            model,
-            STAGE_PURPOSES[audit.currentStage] ?? "semantic_pipeline",
-            "error",
-            0,
-            false,
-            undefined,
-            text,
-          ),
-        );
-        log(id, audit.currentStage, { error: text });
+        if (
+          error instanceof BudgetExhausted ||
+          error instanceof DeadlineError
+        ) {
+          // Running out of wall clock is not a model failure: say what was
+          // skipped and keep everything that was measured.
+          audit.warnings.push(
+            error instanceof BudgetExhausted
+              ? `Time budget reached: skipped ${text}. Completed measurements are kept.`
+              : `Time budget reached during ${audit.currentStage}. Completed measurements are kept.`,
+          );
+          log(id, audit.currentStage, { budget: text });
+        } else {
+          audit.warnings.push(`Semantic pipeline failed: ${text}`);
+          audit.modelRuns.push(
+            run(
+              model,
+              STAGE_PURPOSES[audit.currentStage] ?? "semantic_pipeline",
+              "error",
+              0,
+              false,
+              undefined,
+              text,
+            ),
+          );
+          log(id, audit.currentStage, { error: text });
+        }
       }
     }
     await stage(
@@ -452,12 +533,13 @@ function intentTargets(audit: Audit): Intent[] {
   return audit.intents;
 }
 
-async function measureIntent(
+export async function measureIntent(
   audit: Audit,
   provider: ModelProvider,
   intent: Intent,
   model: string,
   auditId: string,
+  deadline = Number.POSITIVE_INFINITY,
 ) {
   const started = Date.now();
   try {
@@ -498,12 +580,31 @@ async function measureIntent(
 
     const unmet = new Set<string>();
     const met = new Set<string>();
+    const failedPhrasings: string[] = [];
     for (const [variantIndex, query] of intent.variants.entries()) {
-      const attempt = await provider.attemptIntent(
-        query,
-        intent.successCriteria,
-        audit.evidence,
-      );
+      // Score whatever phrasings fit rather than losing the whole intent.
+      if (variantIndex > 0 && Date.now() > deadline - 12_000) break;
+      let attempt: Awaited<ReturnType<ModelProvider["attemptIntent"]>>;
+      try {
+        attempt = await provider.attemptIntent(
+          query,
+          intent.successCriteria,
+          audit.evidence,
+        );
+      } catch (error) {
+        const text = message(error);
+        failedPhrasings.push(text);
+        audit.retrievals.push({
+          ...failedRetrieval("", query, variantIndex, "direct", [], text),
+          claimId: undefined,
+          intentId: intent.id,
+        });
+        audit.modelRuns.push(
+          run(model, "intent_attempt", "error", 0, false, undefined, text),
+        );
+        if (error instanceof DeadlineError) break;
+        continue;
+      }
       const verdict = attempt.value;
       intent.variantsMeasured += 1;
       if (verdict.satisfied) intent.variantsSatisfied += 1;
@@ -545,12 +646,22 @@ async function measureIntent(
     for (const criterion of met) unmet.delete(criterion);
     intent.metCriteria = [...met];
     intent.unmetCriteria = [...unmet];
+    // Scored on the phrasings that actually ran. Only when none ran is the
+    // intent an error, because then there is no measurement to report.
     intent.outcome =
-      intent.variantsSatisfied === 0
-        ? "unsatisfied"
-        : intent.variantsSatisfied === intent.variantsMeasured
-          ? "satisfied"
-          : "partial";
+      intent.variantsMeasured === 0
+        ? "error"
+        : intent.variantsSatisfied === 0
+          ? "unsatisfied"
+          : intent.variantsSatisfied === intent.variantsMeasured
+            ? "satisfied"
+            : "partial";
+    if (failedPhrasings.length) {
+      intent.error =
+        intent.variantsMeasured === 0
+          ? failedPhrasings[0]
+          : `${failedPhrasings.length} of ${intent.variants.length} phrasings could not be run (${summariseFailure(failedPhrasings[0])}); the result is scored on the ${intent.variantsMeasured} that were.`;
+    }
     log(auditId, "intent_completion", {
       intentId: intent.id,
       outcome: intent.outcome,
@@ -693,6 +804,15 @@ function normalizeTarget(value: string) {
   url.hash = "";
   return url.href;
 }
+/** Turns a raw provider error into a short, readable cause. */
+function summariseFailure(text: string) {
+  if (/\b503\b|UNAVAILABLE|high demand/i.test(text))
+    return "the model was overloaded";
+  if (/\b429\b|quota/i.test(text)) return "the API quota was exhausted";
+  if (/time budget/i.test(text)) return "the time budget ran out";
+  return text.slice(0, 80);
+}
+
 function message(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
