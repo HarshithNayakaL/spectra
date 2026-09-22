@@ -9,16 +9,45 @@ Standing instructions for anyone — human or agent — committing to this repo.
 - **Commits are authored and committed as the repo owner**, never as an agent.
   No `Co-Authored-By` trailer, no agent name in a commit message, a code
   comment, or anything else that lands in the repository.
-- **Commits must show as Verified on GitHub.** Push through the GitHub API
-  (`create_or_update_file` / `push_files`), which GitHub signs with its own
-  key, rather than `git push` over HTTPS — a local `git push` from an agent
-  session signs with a key GitHub does not know and lands as `unknown_key`.
-  After pushing, check it:
+- **Commits must show as Verified on GitHub.** Use `git push`, not the GitHub
+  API. Measured, not assumed:
+
+  | How the commit was made             | `verification.reason`                          |
+  | ----------------------------------- | ---------------------------------------------- |
+  | `git push` from an agent session    | `unknown_key` — signed, key not on the account |
+  | `create_or_update_file` via the API | `unsigned` — GitHub does not sign it           |
+
+  An `unknown_key` commit becomes Verified the moment the signing key is added
+  to the account; an `unsigned` one never can. So push with git, and register
+  the session's SSH signing key once under **Settings → SSH and GPG keys → New
+  SSH key**, with **Key type: Signing Key**.
+
+  Get the key the session is actually signing with — the configured
+  `user.signingkey` file can be empty because the key lives in the signing
+  helper, so read it out of a commit's own signature:
+
+  ```bash
+  git cat-file -p HEAD | python3 -c "
+  import sys, base64, struct
+  raw = sys.stdin.read()
+  b64 = ''.join(l.strip() for l in raw[raw.index('-----BEGIN SSH SIGNATURE-----'):
+                                       raw.index('-----END SSH SIGNATURE-----')].split(chr(10))[1:])
+  blob = base64.b64decode(b64); off = 10
+  klen = struct.unpack('>I', blob[off:off+4])[0]; off += 4
+  pub = blob[off:off+klen]
+  tl = struct.unpack('>I', pub[0:4])[0]
+  print(pub[4:4+tl].decode(), base64.b64encode(pub).decode())"
+  ```
+
+  Then confirm, and say the result rather than assuming it:
 
   ```bash
   curl -s https://api.github.com/repos/HarshithNayakaL/spectra/commits/<sha> \
     | python3 -c "import json,sys; v=json.load(sys.stdin)['commit']['verification']; print(v['verified'], v['reason'])"
   ```
+
+  If a session's commits come back `unknown_key` again, that session is signing
+  with a different key: read it out as above and add that one too.
 
 ## Before pushing
 
