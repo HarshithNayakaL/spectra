@@ -170,3 +170,18 @@ describe("snippetFor", () => {
     expect(snippetFor("Short body.", ["short"], 200)).toBe("Short body.");
   });
 });
+
+describe("stem", () => {
+  it("meets inflections without eating short words or category names", async () => {
+    const { stem } = await import("./retrieval");
+    expect(stem("pricing")).toBe(stem("price"));
+    expect(stem("prices")).toBe(stem("price"));
+    expect(stem("tools")).toBe("tool");
+    expect(stem("companies")).toBe("company");
+    expect(stem("business")).toBe("business");
+    expect(stem("analysis")).toBe("analysis");
+    expect(stem("api")).toBe("api");
+    expect(stem("c++")).toBe("c++");
+    expect(stem("node.js")).toBe("node.js");
+  });
+});

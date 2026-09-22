@@ -3814,3 +3814,236 @@ svg {
     display: none;
   }
 }
+
+/* ============================================================
+   Page, Compare, Track — the tools beside the audit
+   ============================================================ */
+.toolReport {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 max(var(--gutter), env(safe-area-inset-left)) 80px;
+}
+.toolReport > .block:first-child {
+  margin-top: 32px;
+}
+.toolActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.toolLoading {
+  padding: 80px var(--gutter);
+  color: var(--ink-3);
+  text-align: center;
+}
+.headActions {
+  flex-wrap: wrap;
+}
+.extLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.extLink:hover,
+.textLink:hover {
+  text-decoration: underline;
+}
+.textLink {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: none;
+}
+/* Findings: the chip says how much it matters, the line says what it is. */
+.findList {
+  display: grid;
+  gap: 0;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.findList li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--rule-faint);
+  font-size: var(--t-small);
+  line-height: 1.55;
+}
+.findList li:last-child {
+  border-bottom: 0;
+}
+.findList li:not(:has(.chip)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.findList .chip {
+  margin-left: 0;
+  min-width: 72px;
+  justify-content: center;
+}
+/* Facts: label over value, in a grid that reflows to one column. */
+.factGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
+  gap: 1px;
+  margin: 8px 0 12px;
+  border: 1px solid var(--rule-faint);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--rule-faint);
+}
+.factGrid > div {
+  padding: 12px 14px;
+  background: var(--paper);
+}
+.factGrid dt {
+  color: var(--ink-3);
+  font: 500 var(--t-micro) / 1.3 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.factGrid dd {
+  margin: 5px 0 0;
+  font-size: var(--t-small);
+  overflow-wrap: anywhere;
+}
+.factGrid > .bad dd,
+.small.bad {
+  color: var(--signal);
+  font-weight: 600;
+}
+.schemaRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+}
+.schemaRow p {
+  margin: 4px 0 0;
+}
+.outline {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--t-small);
+  line-height: 1.5;
+}
+.outline li {
+  padding: 4px 0;
+  overflow-wrap: anywhere;
+}
+.outline .mono {
+  margin-right: 6px;
+  color: var(--ink-3);
+  font-size: var(--t-micro);
+}
+.outline .h2 {
+  padding-left: 14px;
+}
+.outline .h3 {
+  padding-left: 28px;
+  color: var(--ink-2);
+}
+.crawlText {
+  max-height: 420px;
+  overflow-y: auto;
+  margin: 8px 0 0;
+  padding-right: 6px;
+  color: var(--ink-2);
+  font-size: var(--t-small);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  scrollbar-width: thin;
+}
+/* The comparison board: rows are measures, columns are sites. */
+.compareTable th[scope="row"] {
+  color: var(--ink);
+  font: 600 var(--t-small) / 1.4 var(--sans);
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: normal;
+  min-width: 180px;
+}
+.compareTable td {
+  white-space: nowrap;
+}
+.compareTable td.lead {
+  font-weight: 700;
+  box-shadow: inset 2px 0 0 var(--ink);
+}
+.compareTable td.muted {
+  color: var(--ink-3);
+}
+.compareTable thead .chip {
+  margin-left: 6px;
+}
+.delta {
+  margin-left: 6px;
+  font-size: var(--t-micro);
+  font-weight: 700;
+}
+.delta.up {
+  color: oklch(0.52 0.12 150);
+}
+.delta.down {
+  color: var(--signal);
+}
+@media (width < 48rem) {
+  .compareTable tr {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .compareTable th[scope="row"] {
+    display: block;
+    grid-column: 1 / -1;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+  }
+  .compareTable td {
+    white-space: normal;
+  }
+  .compareTable td.lead {
+    box-shadow: none;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .schemaRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .findList li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .findList .chip {
+    justify-self: start;
+  }
+}
+/* Five tools do not fit beside the brand on a phone: the row scrolls. */
+@media (width < 48rem) {
+  .topNav {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin-left: 8px;
+  }
+  .topNav::-webkit-scrollbar {
+    display: none;
+  }
+  .topNav a {
+    flex: none;
+    padding-inline: 8px;
+  }
+}
+.durability {
+  margin-bottom: 16px;
+  padding: 14px 18px;
+  font-size: var(--t-small);
+  line-height: 1.55;
+  border-color: var(--signal);
+}

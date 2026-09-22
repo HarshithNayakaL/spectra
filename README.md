@@ -202,6 +202,34 @@ GET  /api/journeys/:id          one saved trail
 GET  /api/journeys/catalogue    the jobs and agents the runner accepts
 ```
 
+## The five tools
+
+| Tool                     | Question it answers                                                   | Needs a model?                                     |
+| ------------------------ | --------------------------------------------------------------------- | -------------------------------------------------- |
+| **Audit** (`/`)          | Is the whole site in the answer, and what do I change?                | For live answers; everything else runs without one |
+| **Page** (`/page`)       | What does each AI crawler get from this one URL, and may it quote it? | No                                                 |
+| **Compare** (`/compare`) | How do I stand against up to three rivals, measured the same way?     | Only to expand a topic into questions              |
+| **Track** (`/track`)     | What moved between audits, and which fixes landed?                    | No                                                 |
+| **Journey** (`/journey`) | Can an agent actually finish a job on the site?                       | Chooses the route; never the verdict               |
+
+- **Page** fetches one URL raw, reads robots.txt for that exact path for 14 search
+  and training crawlers, requests it live as six agents, reads snippet controls
+  (`noindex`, `nosnippet`, `max-snippet`, `data-nosnippet`, canonical), checks
+  every JSON-LD node against the properties its type needs, scores
+  citability, and, given a question, retrieves over the page to say which of
+  its words are missing. `POST /api/pages {url, question?}`.
+- **Compare** crawls each site in parallel with the audit's own crawler and
+  scores them with the audit's own checks. Questions are retrieved over one
+  index holding every site's pages, so each is won by whichever page in the
+  market carries it best. A site that cannot be crawled is shown as not
+  measured. `POST /api/compares` streams NDJSON; `GET /api/compares/:id`.
+- **Track** keeps one row per finished audit of a host (readiness, visibility,
+  citability, answerable sub-queries, rivals' wins, failing checks) and diffs
+  runs. A number a run could not measure stays null, so it never reads as a
+  drop. `GET /api/history/:host`. History is durable only with a Vercel Blob
+  store connected; without one the endpoint says `durable: false` and the page
+  says so.
+
 ## Rust crawler and security
 
 The crawler owns URL validation, DNS/IP safety, redirect validation, robots discovery, bounded fetching, extraction, and duplicate detection. It never sends raw HTML to Gemini. Non-HTTP schemes, embedded credentials, non-public addresses, unsafe redirect targets, oversized bodies, and unsupported content types are rejected. Defaults: 10 second request timeout, 2 MiB per response, 5 redirects, 20 pages, depth 2, concurrency 4. These are defense-in-depth controls, not a claim that arbitrary remote content is harmless.

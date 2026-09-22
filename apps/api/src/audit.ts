@@ -39,7 +39,7 @@ import {
 } from "@spectra/schemas";
 import { DEFAULT_MODEL } from "./models";
 import { crawlRival, scanSite, ScanError } from "./scan";
-import { saveAudit } from "./store";
+import { recordHistory, saveAudit } from "./store";
 
 export type Progress = (
   stage: string,
@@ -527,6 +527,9 @@ async function finish(audit: Audit, started: number, status: Audit["status"]) {
   audit.completedAt = new Date().toISOString();
   audit.durationMs = Date.now() - started;
   await saveAudit(audit);
+  // The history is a convenience on top of the audit: failing to write it
+  // must never fail the audit that has already been saved.
+  await recordHistory(audit).catch(() => {});
   return audit;
 }
 

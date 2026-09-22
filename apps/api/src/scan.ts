@@ -183,7 +183,7 @@ function unreachable(target: string, error: unknown) {
   return `Could not reach ${target}: ${text}`;
 }
 
-async function probe(
+export async function probe(
   url: URL,
   accept: string,
   maxBytes = 200_000,
@@ -211,7 +211,7 @@ async function probe(
  * answers 403 to GPTBot but 200 to Chrome blocks that engine no matter what
  * robots.txt says.
  */
-async function probeBots(origin: URL): Promise<BotProbe[]> {
+export async function probeBots(origin: URL): Promise<BotProbe[]> {
   const agents = [{ name: "Browser", ua: BROWSER_AGENT }, ...AI_AGENTS];
   return Promise.all(
     agents.map(async ({ name, ua }) => {
@@ -354,7 +354,7 @@ function normalise(href: string) {
   }
 }
 
-function isHtml(response: Fetched) {
+export function isHtml(response: Fetched) {
   const type = response.headers.get("content-type") ?? "";
   return (
     response.status < 400 &&
@@ -425,6 +425,7 @@ export function readPage(response: {
     if (($(element).attr("alt") ?? "").trim()) imagesWithAlt += 1;
   });
   const scripts = $("script[src]").length;
+  const nosnippetBlocks = $("[data-nosnippet]").length;
   const hasDate = Boolean(
     $("time[datetime]").length ||
     $("meta[property='article:published_time']").length ||
@@ -467,6 +468,11 @@ export function readPage(response: {
   ).length;
 
   $("script,style,noscript,svg,template,iframe").remove();
+  // Block boundaries become spaces before any text is taken. cheerio's text()
+  // joins adjacent blocks with nothing, so "Free</div><div>Unlimited" read as
+  // one word, and that glued word is what retrieval then failed to match.
+  $("br").replaceWith(" ");
+  $(BLOCK).append(" ");
   const bodyText = clean($("body").text());
   const mainText = clean(
     $("main").first().text() || $("article").first().text() || bodyText,
@@ -538,6 +544,7 @@ export function readPage(response: {
     passages,
     lists,
     tables,
+    nosnippetBlocks,
   };
 }
 

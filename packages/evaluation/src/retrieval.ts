@@ -70,7 +70,7 @@ const STOP = new Set(
     "that the their there these they this to was what when where which who why " +
     "will with you your our we us can do does not into over under about more " +
     "most best top good great new other any all some each per via use using " +
-    "used need needs want like get got make made take should would could"
+    "used need needs want like get got make made take should would could much many"
   ).split(" "),
 );
 
@@ -83,6 +83,31 @@ export function tokenise(value: string): string[] {
       .map((token) => token.replace(/^['.-]+|['.-]+$/g, ""))
       .filter((token) => token.length >= 2 && !STOP.has(token))
   );
+}
+
+/**
+ * A deliberately light stemmer: plural and inflected endings come off so
+ * "price", "prices" and "pricing" meet, and "tools" finds "tool". It never
+ * leaves fewer than three letters, and it leaves category names such as c++,
+ * c# and node.js alone. Only matching uses it; the report shows the words as
+ * they were typed.
+ */
+export function stem(token: string): string {
+  if (!/^[a-z]+$/.test(token) || token.length <= 3) return token;
+  let word = token;
+  if (word.endsWith("ies") && word.length > 4) return `${word.slice(0, -3)}y`;
+  for (const ending of ["ing", "ed", "es", "s"]) {
+    if (
+      word.endsWith(ending) &&
+      word.length - ending.length >= 3 &&
+      !(ending === "s" && /(ss|us|is)$/.test(word))
+    ) {
+      word = word.slice(0, -ending.length);
+      break;
+    }
+  }
+  if (word.endsWith("e") && word.length > 3) word = word.slice(0, -1);
+  return word;
 }
 
 /**
@@ -105,7 +130,7 @@ function fieldText(page: IndexedPage) {
 
 export function buildIndex(pages: IndexedPage[]): RetrievalIndex {
   const docs: Doc[] = pages.map((page) => {
-    const tokens = tokenise(fieldText(page));
+    const tokens = tokenise(fieldText(page)).map(stem);
     const freq = new Map<string, number>();
     for (const token of tokens) freq.set(token, (freq.get(token) ?? 0) + 1);
     return {
@@ -159,9 +184,9 @@ export function retrieveRanked(
     if (options.host && doc.host !== options.host) continue;
     let score = 0;
     for (const term of terms) {
-      const frequency = doc.freq.get(term);
+      const frequency = doc.freq.get(stem(term));
       if (!frequency) continue;
-      const idf = index.idf.get(term) ?? 0.05;
+      const idf = index.idf.get(stem(term)) ?? 0.05;
       const norm =
         (frequency * (K1 + 1)) /
         (frequency +
@@ -174,7 +199,7 @@ export function retrieveRanked(
     (a, b) => b.score - a.score || a.doc.url.localeCompare(b.doc.url),
   );
   return scored.slice(0, options.limit ?? 5).map(({ doc, score }) => {
-    const matched = terms.filter((term) => doc.freq.has(term));
+    const matched = terms.filter((term) => doc.freq.has(stem(term)));
     const coverage = matched.length / terms.length;
     return {
       status: (coverage >= ANSWERED
@@ -188,8 +213,8 @@ export function retrieveRanked(
       score: Math.round(score * 100) / 100,
       coverage: Math.round(coverage * 100) / 100,
       matched,
-      missingTerms: terms.filter((term) => !doc.freq.has(term)),
-      snippet: snippetFor(doc.body, matched),
+      missingTerms: terms.filter((term) => !doc.freq.has(stem(term))),
+      snippet: snippetFor(doc.body, matched.map(stem)),
     };
   });
 }

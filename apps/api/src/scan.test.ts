@@ -45,6 +45,13 @@ describe("readPage structure", () => {
     ]);
   });
 
+  it("keeps words in adjacent blocks apart", () => {
+    const page = read(
+      "<html><body><main><div>Free</div><div>Unlimited members</div><p>Line one<br>line two</p></main></body></html>",
+    );
+    expect(page.excerpt).toBe("Free Unlimited members Line one line two");
+  });
+
   it("falls back to the body when the page marks no main content", () => {
     const page = read(
       "<html><body><p>Acme Ledger sends invoices and chases late payments for you.</p></body></html>",

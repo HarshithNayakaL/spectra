@@ -48,6 +48,8 @@ export const pageSignalsSchema = z.object({
   /** Lists with two or more items, and tables with two or more rows. */
   lists: z.number().int().default(0),
   tables: z.number().int().default(0),
+  /** Elements marked data-nosnippet, whose text engines must not quote. */
+  nosnippetBlocks: z.number().int().default(0),
 });
 
 export const fileProbeSchema = z.object({

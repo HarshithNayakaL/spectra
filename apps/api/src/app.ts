@@ -17,7 +17,16 @@ import {
   runJourney,
 } from "./journey";
 import { JOURNEY_INTENTS } from "@spectra/evaluation";
-import { getAudit, getJourney, storeKind } from "./store";
+import {
+  getAudit,
+  getCompare,
+  getHistory,
+  getJourney,
+  historyKey,
+  storeKind,
+} from "./store";
+import { InspectError, inspectUrl } from "./inspect";
+import { hostsOf, runCompare } from "./compare";
 
 export const app = new Hono();
 const allowedOrigins = new Set(
@@ -35,8 +44,12 @@ const MAX_CONCURRENT_AUDITS = Number(
 const MAX_CONCURRENT_JOURNEYS = Number(
   process.env.SPECTRA_MAX_CONCURRENT_JOURNEYS || 4,
 );
+const MAX_CONCURRENT_COMPARES = Number(
+  process.env.SPECTRA_MAX_CONCURRENT_COMPARES || 2,
+);
 let running = 0;
 let walking = 0;
+let comparing = 0;
 
 app.use(
   "/api/*",
@@ -296,6 +309,133 @@ app.post("/api/journeys", async (c) => {
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
     },
+  });
+});
+
+/**
+ * One URL, inspected the way an AI crawler would fetch it. A single page is
+ * fast enough to answer in one response, so this does not stream.
+ */
+app.post("/api/pages", async (c) => {
+  const parsed = z
+    .object({
+      url: z.string().min(1).max(2048),
+      question: z.string().trim().max(280).default(""),
+    })
+    .safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: "A URL is required." }, 400);
+  const target = readableTarget(parsed.data.url);
+  if (!target.ok) return c.json({ error: target.error }, 400);
+  try {
+    return c.json(await inspectUrl(target.value, parsed.data.question));
+  } catch (error) {
+    return c.json(
+      {
+        error:
+          error instanceof InspectError
+            ? error.message
+            : "The page could not be inspected.",
+      },
+      422,
+    );
+  }
+});
+
+app.get("/api/compares/:id", async (c) => {
+  const record = await getCompare(c.req.param("id"));
+  return record
+    ? c.json(record)
+    : c.json({ error: "Comparison not found" }, 404);
+});
+
+/** Your site and up to three rivals, crawled and scored the same way. */
+app.post("/api/compares", async (c) => {
+  const parsed = z
+    .object({
+      sites: z.array(z.string().max(2048)).min(1).max(8),
+      questions: z.array(z.string().trim().max(280)).max(8).default([]),
+      topic: z.string().trim().max(200).default(""),
+      model: z
+        .string()
+        .refine(isValidModelId, "Unrecognised model id")
+        .default(DEFAULT_MODEL),
+    })
+    .safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success)
+    return c.json({ error: "Give your site and at least one rival." }, 400);
+  for (const site of parsed.data.sites.filter((value) => value.trim())) {
+    const target = readableTarget(site);
+    if (!target.ok) return c.json({ error: `${site}: ${target.error}` }, 400);
+  }
+  const hosts = hostsOf(parsed.data.sites);
+  if (hosts.length < 2)
+    return c.json(
+      { error: "Give your site and at least one rival, on different hosts." },
+      400,
+    );
+  if (comparing >= MAX_CONCURRENT_COMPARES)
+    return c.json(
+      { error: "Too many comparisons are already running. Try again shortly." },
+      503,
+    );
+  comparing += 1;
+  const stream = new ReadableStream({
+    async start(controller) {
+      let open = true;
+      const write = (payload: unknown) => {
+        if (!open) return;
+        try {
+          controller.enqueue(
+            new TextEncoder().encode(JSON.stringify(payload) + "\n"),
+          );
+        } catch {
+          open = false;
+        }
+      };
+      try {
+        write({
+          type: "result",
+          compare: await runCompare(
+            { ...parsed.data, sites: hosts },
+            (snapshot) => write({ type: "progress", compare: snapshot }),
+          ),
+        });
+      } catch (error) {
+        write({
+          type: "error",
+          message:
+            error instanceof Error ? error.message : "The comparison failed.",
+        });
+      } finally {
+        comparing -= 1;
+        open = false;
+        try {
+          controller.close();
+        } catch {
+          // The client walked away first.
+        }
+      }
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "content-type": "application/x-ndjson",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    },
+  });
+});
+
+/** Every finished audit of one site, newest first. */
+app.get("/api/history/:host", async (c) => {
+  const host = historyKey(c.req.param("host"));
+  if (!host) return c.json({ error: "Not a hostname." }, 400);
+  // Without a Blob store the history lives on one instance's disk and can
+  // vanish; the page says so rather than implying a record it cannot keep.
+  return c.json({
+    host,
+    durable: storeKind === "blob",
+    entries: await getHistory(host),
   });
 });
 

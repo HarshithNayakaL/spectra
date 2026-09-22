@@ -10,3 +10,7 @@ export * from "./board";
 export * from "./journey";
 export * from "./citability";
 export * from "./briefs";
+export * from "./structured";
+export * from "./page";
+export * from "./compare";
+export * from "./history";

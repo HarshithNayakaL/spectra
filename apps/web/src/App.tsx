@@ -31,14 +31,54 @@ import {
 import { BoardSection, FanoutSection } from "./Board";
 import { BriefsSection, CitabilitySection } from "./Content";
 import { JourneyPage } from "./Journey";
+import { CompareTool, PageTool, TrackTool } from "./Tools";
 import { Picker } from "./Picker";
 import { API, modelBadge, modelMeta, useModels, type ModelOption } from "./api";
 
 const TERMINAL = new Set(["complete", "partial", "failed"]);
 
+function siteParam() {
+  return new URLSearchParams(location.search).get("site") ?? "";
+}
+
+type Tool = "audit" | "page" | "compare" | "track" | "journey";
+/** The five tools, in the order a site is usually worked on. */
+const TOOLS: Array<{ id: Tool; label: string; href: string; title: string }> = [
+  {
+    id: "audit",
+    label: "Audit",
+    href: "/",
+    title: "The whole site, as AI sees it",
+  },
+  {
+    id: "page",
+    label: "Page",
+    href: "/page",
+    title: "One URL, as each AI crawler receives it",
+  },
+  {
+    id: "compare",
+    label: "Compare",
+    href: "/compare",
+    title: "You against your rivals",
+  },
+  {
+    id: "track",
+    label: "Track",
+    href: "/track",
+    title: "What moved between audits",
+  },
+  {
+    id: "journey",
+    label: "Journey",
+    href: "/journey",
+    title: "Can an agent do the job?",
+  },
+];
+
 export function App() {
   const [audit, setAudit] = useState<Audit | null>(null),
-    [url, setUrl] = useState(""),
+    [url, setUrl] = useState(siteParam),
     [progress, setProgress] = useState<{ stage: string; message: string }[]>(
       [],
     ),
@@ -49,7 +89,8 @@ export function App() {
     [running, setRunning] = useState(false),
     [prompts, setPrompts] = useState<string[]>([""]),
     [model, setModel] = useState("gemini-3.1-flash-lite"),
-    [path, setPath] = useState(location.pathname);
+    [path, setPath] = useState(location.pathname),
+    [toolKey, setToolKey] = useState(0);
   const headline = audit?.visibility?.score ?? audit?.readiness?.score ?? null;
   const pageState: PageState = error
     ? "error"
@@ -76,6 +117,17 @@ export function App() {
   // Journey is the other half of the product: one agent, one job, one site.
   const onJourney = path === "/journey" || path.startsWith("/journeys/");
   const journeyId = path.match(/^\/journeys\/([a-f0-9-]{36})$/)?.[1];
+  const onCompare = path === "/compare" || path.startsWith("/compares/");
+  const compareId = path.match(/^\/compares\/([a-f0-9-]{36})$/)?.[1];
+  const tool: Tool = onJourney
+    ? "journey"
+    : onCompare
+      ? "compare"
+      : path === "/page"
+        ? "page"
+        : path === "/track"
+          ? "track"
+          : "audit";
 
   useEffect(() => {
     const onPop = () => setPath(location.pathname);
@@ -84,11 +136,21 @@ export function App() {
   }, []);
 
   const navigate = useCallback((next: string, replace = false) => {
-    if (next === location.pathname) return;
+    // A link can carry a query (/page?url=…); routing reads the path alone.
+    if (next === location.pathname + location.search) return;
     if (replace) history.replaceState({}, "", next);
     else history.pushState({}, "", next);
-    setPath(next);
+    setPath(new URL(next, location.origin).pathname);
   }, []);
+
+  // Another tool can hand a site to the audit: /?site=example.com fills it in.
+  useEffect(() => {
+    const site = siteParam();
+    if (path === "/" && site) {
+      setUrl(site);
+      setAudit(null);
+    }
+  }, [path]);
 
   const loadedId = audit?.id;
   useEffect(() => {
@@ -220,27 +282,25 @@ export function App() {
           <span className="brandRule" aria-hidden="true" />
           SPECTRA
         </a>
-        <nav className="topNav" aria-label="Sections">
-          <a
-            href="/"
-            aria-current={onJourney ? undefined : "page"}
-            onClick={(event) => {
-              event.preventDefault();
-              navigate("/");
-            }}
-          >
-            Audit
-          </a>
-          <a
-            href="/journey"
-            aria-current={onJourney ? "page" : undefined}
-            onClick={(event) => {
-              event.preventDefault();
-              navigate("/journey");
-            }}
-          >
-            Journey
-          </a>
+        <nav className="topNav" aria-label="Tools">
+          {TOOLS.map((item) => (
+            <a
+              key={item.id}
+              href={item.href}
+              aria-current={tool === item.id ? "page" : undefined}
+              title={item.title}
+              onClick={(event) => {
+                if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+                event.preventDefault();
+                // Opening a tool from its own tab starts it afresh.
+                navigate(item.href);
+                setToolKey((key) => key + 1);
+                window.scrollTo({ top: 0 });
+              }}
+            >
+              {item.label}
+            </a>
+          ))}
         </nav>
         <span className="topMeta">
           <HugeiconsIcon
@@ -255,8 +315,18 @@ export function App() {
       </header>
       <main id="main">
         <ErrorBoundary>
-          {onJourney ? (
-            <JourneyPage id={journeyId} navigate={navigate} />
+          {tool === "journey" ? (
+            <JourneyPage key={toolKey} id={journeyId} navigate={navigate} />
+          ) : tool === "page" ? (
+            <PageTool key={toolKey} navigate={navigate} />
+          ) : tool === "compare" ? (
+            <CompareTool
+              key={`${toolKey}-${compareId ?? ""}`}
+              id={compareId}
+              navigate={navigate}
+            />
+          ) : tool === "track" ? (
+            <TrackTool key={toolKey} navigate={navigate} />
           ) : loadingAudit ? (
             <Skeleton />
           ) : !audit ? (
@@ -728,6 +798,27 @@ function Report({
               >
                 Re-run
               </button>
+              <a
+                className="btn ghost"
+                href={`/compare?sites=${encodeURIComponent(
+                  [
+                    audit.host,
+                    ...(audit.fanout?.rivals ?? [])
+                      .filter((rival) => rival.pages > 0)
+                      .map((rival) => rival.host),
+                  ]
+                    .slice(0, 4)
+                    .join(","),
+                )}${audit.profile?.category ? `&topic=${encodeURIComponent(audit.profile.category)}` : ""}`}
+              >
+                Compare with rivals
+              </a>
+              <a
+                className="btn ghost"
+                href={`/track?host=${encodeURIComponent(audit.host)}`}
+              >
+                Track over time
+              </a>
             </div>
           </header>
 
@@ -1344,6 +1435,7 @@ function Pages({ audit }: { audit: Audit }) {
                 <th>Description</th>
                 <th>Structured data</th>
                 <th className="num">Load</th>
+                <th>Inspect</th>
               </tr>
             </thead>
             <tbody>
@@ -1374,6 +1466,11 @@ function Pages({ audit }: { audit: Audit }) {
                   </td>
                   <td data-label="Load" className="num">
                     {(p.ms / 1000).toFixed(1)}s
+                  </td>
+                  <td data-label="Inspect">
+                    <a href={`/page?url=${encodeURIComponent(p.url)}`}>
+                      What AI sees
+                    </a>
                   </td>
                 </tr>
               ))}
