@@ -20,6 +20,24 @@ The production relational model uses append-only audits. `targets` own many `aud
 6. Model JSON is untrusted until schema validation succeeds.
 7. Scoring consumes measured checks only.
 
+## Fan-out and the board
+
+`expandFanout` is the only new model call in the audit path, and it returns a
+plan, not a verdict: typed sub-queries validated against `fanoutPlanSchema`
+before any of them is sent. Each sub-query is then an ordinary grounded `ask`,
+and `summariseFanout` in `packages/evaluation` counts what came back. The stage
+is bounded by the same wall clock as the rest of the audit: its width is
+`floor((timeLeft - 45s) / 9s)` capped at seven, and below three sub-queries it
+declines to run and records why rather than publishing a coverage number built
+from one answer.
+
+`buildBoard` is pure and derived. It reads an `Audit` and returns the per-stage
+state, coverage and gaps; nothing about it is persisted, so the schema does not
+version with it and an audit written before the board existed still renders one.
+A stage distinguishes four outcomes that used to look the same: it ran cleanly,
+it ran and found gaps, it has not run yet, and it could not run — the last two
+always carrying the reason.
+
 ## Journeys
 
 A journey is a second, independent measurement over the same trust boundaries.

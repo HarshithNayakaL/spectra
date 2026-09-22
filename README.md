@@ -57,8 +57,56 @@ The API creates immutable audit snapshots and exposes them at `/api/audits/:id`,
 6. Ask the configured model provider for schema-constrained classification and semantic observations.
 7. Select supported evaluation dimensions for the site archetype.
 8. Generate retrieval questions from evidence-backed claims; run direct evaluation and optional Google Search grounding.
-9. Calculate `spectra-v0.1` metrics from registered checks and visible denominators.
-10. Diagnose positioning bugs and produce evidence-linked repairs.
+9. Expand the headline question into typed fan-out sub-queries and run each one.
+10. Calculate `spectra-v0.1` metrics from registered checks and visible denominators.
+11. Diagnose positioning bugs and produce evidence-linked repairs.
+
+## Fan-out: what the engine actually searches
+
+An answer engine never searches the question it was asked. Google's AI Mode
+decomposes it into synthetic sub-queries — its patents call the expansions
+"themes", the industry calls the mechanism **query fan-out** — fires them at
+its search tool in parallel, reads what comes back, and writes one cited answer
+from it. ChatGPT Search and Perplexity work the same shape.
+
+So "do we rank for this question" is the wrong measurement. SPECTRA measures the
+fan-out instead. It expands one headline buyer question into the sub-queries an
+engine would issue, typed by kind, runs each one against Gemini with live Google
+Search, and records what came back:
+
+| Kind of sub-query  | What it stands for                             |
+| ------------------ | ---------------------------------------------- |
+| `equivalent`       | The same question in different words           |
+| `canonicalization` | The industry's own name for the category       |
+| `specification`    | A narrower cut: segment, size, place, use case |
+| `generalization`   | The broader question this one sits inside      |
+| `comparison`       | Head-to-head and "alternatives to X"           |
+| `follow_up`        | What the reader asks immediately after         |
+| `entailment`       | What the question took for granted             |
+
+The headline number is **fan-out coverage**: the share of sub-queries that
+reached you at all, by naming you or by using your own site as a source. The
+useful number is the breakdown by kind — a kind you never appear in is a kind of
+buyer you never reach, and losing every `comparison` sub-query to a review site
+is a different problem from losing every `canonicalization` one to your own
+vocabulary.
+
+Every prompt also records `issuedQueries`: the queries Gemini's search tool
+literally typed while answering. Nobody typed those; the engine invented them on
+your behalf, and the report shows them verbatim.
+
+## The board: how far it got, and what is missing
+
+An audit produces a lot of true statements. What it _could not_ measure is just
+as informative, and a stage that never ran used to look identical to a stage
+that ran and found nothing.
+
+The board is one specification sheet across the whole pipeline — crawl,
+extraction, entity, AI files, fan-out, answers, fixes — and for each stage it
+reports the state, what it measured, its coverage, and every gap with a link to
+the evidence. It is derived from the audit alone and never stored, so a report
+saved before the board existed still renders one, and it fills in live while the
+audit runs.
 
 ## Journey: watching an agent use the site
 

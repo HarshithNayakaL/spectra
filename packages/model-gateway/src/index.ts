@@ -1,7 +1,9 @@
 import { z } from "zod";
 import {
+  fanoutTypeSchema,
   navigatorMoveSchema,
   profileSchema,
+  type FanoutType,
   type NavigatorContext,
   type NavigatorMove,
   type Profile,
@@ -31,6 +33,12 @@ export type Answer = {
   sources: Array<{ uri: string; title: string }>;
   queries: string[];
 };
+/** One sub-query an answer engine would fan a question out to. */
+export type FanoutPlan = {
+  type: FanoutType;
+  query: string;
+  covers: string;
+};
 export type AnswerAnalysis = {
   id: string;
   competitors: string[];
@@ -43,6 +51,12 @@ export interface ModelProvider {
   profileSite(input: ProfileInput): Promise<Result<SiteProfile>>;
   /** Asks the question exactly as a user would, optionally grounded in Google Search. */
   ask(query: string, grounded: boolean): Promise<Result<Answer>>;
+  /** Expands one question into the sub-queries an answer engine would issue. */
+  expandFanout(input: {
+    profile: Profile;
+    seed: string;
+    count: number;
+  }): Promise<Result<FanoutPlan[]>>;
   analyseAnswers(
     profile: Profile,
     items: Array<{ id: string; prompt: string; answer: string }>,
@@ -94,6 +108,48 @@ const siteProfileResponseSchema = {
     "brandedPrompts",
   ],
 };
+const fanoutPlanSchema = z.object({
+  queries: z
+    .array(
+      z.object({
+        type: fanoutTypeSchema,
+        query: z.string().min(3).max(240),
+        covers: z.string().default(""),
+      }),
+    )
+    .min(1)
+    .max(12),
+});
+const fanoutResponseSchema = {
+  type: "object",
+  properties: {
+    queries: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            enum: [
+              "equivalent",
+              "follow_up",
+              "generalization",
+              "specification",
+              "canonicalization",
+              "entailment",
+              "comparison",
+            ],
+          },
+          query: { type: "string" },
+          covers: { type: "string" },
+        },
+        required: ["type", "query", "covers"],
+      },
+    },
+  },
+  required: ["queries"],
+};
+
 const moveResponseSchema = {
   type: "object",
   properties: {
@@ -298,6 +354,44 @@ Rules: never claim something the page did not say. A page with almost no text is
       navigatorMoveSchema,
       moveResponseSchema,
     );
+  }
+
+  /**
+   * Expands one buyer question the way an answer engine does before it
+   * searches: several synthetic sub-queries, each standing for a different
+   * slice of the intent. These are not keywords anybody typed; they are what
+   * the machine asks on the reader's behalf, which is what has to be won.
+   */
+  async expandFanout(input: {
+    profile: Profile;
+    seed: string;
+    count: number;
+  }): Promise<Result<FanoutPlan[]>> {
+    const result = await this.structured(
+      `An AI answer engine never searches the question it was asked. It decomposes the question into synthetic sub-queries, fires them at a web search tool in parallel, reads the results and synthesises one cited answer.
+
+Write the ${input.count} sub-queries a strong answer engine would issue for the question below. Use these kinds, at most two of any one kind:
+- equivalent: the same question in different words, as a different person would phrase it.
+- specification: a narrower cut of it (a segment, a size of company, a place, a use case, a budget).
+- generalization: the broader question this one sits inside.
+- comparison: a head-to-head or "alternatives to <a real, well-known competitor>" question.
+- canonicalization: the standard industry name for the category, as a buyer who knows the market would search it.
+- follow_up: what the reader asks immediately after getting an answer (price, integration, migration, trust, support).
+- entailment: something the question takes for granted and the engine would verify (does this even exist for X, is it available in Y, is it compliant with Z).
+
+THE QUESTION: ${input.seed}
+
+CONTEXT, for realism only. Never name the brand in a sub-query unless the kind is "comparison" and it is a competitor's name.
+CATEGORY: ${input.profile.category}
+WHAT IT SELLS: ${input.profile.description}
+WHO BUYS IT: ${input.profile.audience || "unstated"}
+MARKET: ${input.profile.market || "unstated"}
+
+Each sub-query must be something a person could type into Google and get results for: plain words, no operators, no quotes, no "site:", 3 to 14 words. Also return "covers": the buyer intent that sub-query stands for, in under twelve words.`,
+      fanoutPlanSchema,
+      fanoutResponseSchema,
+    );
+    return { ...result, value: result.value.queries };
   }
 
   async analyseAnswers(

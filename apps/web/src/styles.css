@@ -2007,7 +2007,9 @@ svg {
 }
 .steps4 {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* One column per step, whatever the count: the list grew to five when the
+     fan-out stage was added and must not need a new class to do it again. */
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 24px;
   margin: 20px 0 0;
   padding: 0;
@@ -3208,5 +3210,357 @@ svg {
     display: inline-block;
     min-width: 24px;
     padding: 4px 0;
+  }
+}
+
+/* ============================================================
+   The board — a specification sheet, not a dashboard
+   Thin rules, mono labels, no zebra striping. The row lifts on
+   hover so the eye can track across it; nothing changes colour
+   except the one signal that marks a failure.
+   ============================================================ */
+.boardSheet {
+  border: 1px solid var(--card-edge);
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: var(--lift-1);
+  overflow: hidden;
+}
+.boardHead,
+.boardRow > button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px 132px 86px;
+  align-items: center;
+  gap: 20px;
+  padding: 11px 20px;
+}
+.boardHead {
+  color: var(--ink-3);
+  background: var(--field);
+  border-bottom: 1px solid var(--rule);
+  font-size: var(--t-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.boardHeadCoverage,
+.boardCoverage {
+  justify-self: start;
+}
+.boardRows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.boardRow + .boardRow {
+  border-top: 1px solid var(--rule-faint);
+}
+.boardRow > button {
+  width: 100%;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  padding-block: 14px;
+}
+.boardRow > button:disabled {
+  cursor: default;
+}
+.boardRow > button:hover:not(:disabled) {
+  background: var(--field);
+}
+.boardStage {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 12px;
+}
+.boardDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--ink-3);
+  background: none;
+  transform: translateY(-1px);
+}
+.boardDot.pass {
+  border-color: oklch(0.52 0.12 150);
+  background: oklch(0.52 0.12 150);
+}
+.boardDot.partial {
+  border-color: var(--ink);
+  background: linear-gradient(90deg, var(--ink) 50%, transparent 50%);
+}
+.boardDot.fail {
+  border-color: var(--signal);
+  background: var(--signal);
+}
+.boardDot.running {
+  border-color: var(--ink);
+  animation: boardPulse 1.4s var(--ease) infinite;
+}
+@keyframes boardPulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+.boardLabel {
+  font-weight: 600;
+}
+.boardQuestion {
+  grid-column: 2;
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--ink-3);
+  font-size: var(--t-small);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.boardMeasured {
+  color: var(--ink-2);
+  font-size: var(--t-data);
+  font-weight: 600;
+}
+.boardCoverage {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  font-size: var(--t-data);
+}
+.boardCoverage .meter {
+  flex: 1;
+}
+.boardMissing {
+  justify-self: end;
+  font-size: var(--t-data);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.boardRow.fail .boardMissing,
+.boardRow.partial .boardMissing {
+  color: var(--signal);
+}
+.boardRow.skipped .boardLabel,
+.boardRow.running .boardLabel {
+  color: var(--ink-2);
+}
+.boardDetail {
+  padding: 2px 20px 20px 42px;
+}
+.boardFacts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0 28px;
+  margin: 0 0 12px;
+}
+.boardFacts > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--rule-faint);
+}
+.boardFacts dt {
+  color: var(--ink-2);
+  font-size: var(--t-small);
+}
+.boardFacts dd {
+  margin: 0;
+  font-weight: 600;
+}
+.boardFacts > div.bad dd {
+  color: var(--signal);
+}
+.boardGaps {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+.boardGaps li {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  max-width: 88ch;
+  font-size: var(--t-small);
+  line-height: 1.55;
+}
+.boardSeverity {
+  padding: 2px 7px;
+  border-radius: 7px;
+  background: var(--field);
+  color: var(--ink-3);
+  font-size: var(--t-micro);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.boardGaps li.high .boardSeverity {
+  color: var(--signal);
+  background: var(--signal-field);
+}
+.boardGapLink {
+  margin-left: 8px;
+  color: var(--ink-3);
+  font-size: var(--t-data);
+}
+.boardTop {
+  margin-top: 16px;
+  padding: 16px 20px;
+  border-left: 2px solid var(--signal);
+  background: var(--signal-field);
+}
+.boardTop b {
+  display: block;
+  margin-bottom: 8px;
+  font-size: var(--t-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.boardTop ul {
+  margin: 0;
+  padding-left: 18px;
+  max-width: 88ch;
+}
+.boardTop li + li {
+  margin-top: 5px;
+}
+.boardTop li {
+  font-size: var(--t-small);
+  line-height: 1.55;
+}
+
+/* ============================================================
+   Fan-out
+   ============================================================ */
+.fanTypes {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+}
+.fanTypes li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px 44px;
+  align-items: center;
+  gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--rule-faint);
+}
+.fanTypeName {
+  min-width: 0;
+  font-size: var(--t-small);
+  font-weight: 600;
+}
+.fanTypeWhy {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink-3);
+  font-size: var(--t-micro);
+  font-weight: 400;
+  line-height: 1.5;
+}
+.fanTypes li.lost .fanTypeName {
+  color: var(--signal);
+}
+.fanTypes li .mono {
+  text-align: right;
+  font-size: var(--t-data);
+  font-weight: 600;
+}
+.fanList {
+  margin-top: 16px;
+}
+.fanCovers {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: var(--t-small);
+  font-weight: 400;
+}
+.fanAnswer {
+  max-width: 78ch;
+  margin: 0 0 10px;
+  font-size: var(--t-small);
+  line-height: 1.65;
+}
+.fanIssued {
+  max-width: 78ch;
+  margin: 0 0 10px;
+  color: var(--ink-2);
+  font-size: var(--t-data);
+  line-height: 1.6;
+}
+.issuedList {
+  margin: 12px 0 0;
+  padding-left: 22px;
+  columns: 2;
+  column-gap: 26px;
+  font-size: var(--t-data);
+  line-height: 1.7;
+}
+.issuedList li {
+  break-inside: avoid;
+  color: var(--ink-2);
+}
+
+@media (width < 62rem) {
+  .boardHead {
+    display: none;
+  }
+  .boardRow > button {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 16px;
+  }
+  .boardStage {
+    grid-column: 1 / -1;
+  }
+  .boardMeasured {
+    grid-column: 1;
+  }
+  .boardMissing {
+    grid-column: 2;
+  }
+  .boardCoverage {
+    grid-column: 1 / -1;
+    max-width: 260px;
+  }
+  .issuedList {
+    columns: 1;
+  }
+}
+@media (width < 40rem) {
+  .boardDetail {
+    padding: 2px 16px 18px;
+  }
+  .boardFacts {
+    grid-template-columns: 1fr;
+  }
+  .boardGaps li {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .boardSeverity {
+    justify-self: start;
+    min-width: 62px;
+  }
+  .fanTypes li {
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 6px 12px;
+  }
+  .fanTypes li .meter {
+    grid-column: 1 / -1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .boardDot.running {
+    animation: none;
   }
 }

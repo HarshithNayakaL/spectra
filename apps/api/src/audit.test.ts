@@ -76,6 +76,27 @@ function fakeProvider(overrides: Partial<ModelProvider> = {}): ModelProvider {
       usage: {},
       durationMs: 1,
     }),
+    expandFanout: async ({ count }) => ({
+      value: [
+        {
+          type: "comparison" as const,
+          query: "zoominfo alternatives for startups",
+          covers: "A buyer comparing against the incumbent",
+        },
+        {
+          type: "canonicalization" as const,
+          query: "b2b contact data provider",
+          covers: "The category's own name",
+        },
+        {
+          type: "specification" as const,
+          query: "contact data for seed stage sales teams",
+          covers: "A narrower cut of the category",
+        },
+      ].slice(0, count),
+      usage: {},
+      durationMs: 1,
+    }),
     analyseAnswers: async (_profile, items) => ({
       value: items.map((item) => ({
         id: item.id,
@@ -188,5 +209,86 @@ describe("runAudit", () => {
     expect(audit.status).toBe("partial");
     expect(audit.readiness).not.toBeNull();
     expect(audit.visibility).toBeNull();
+  });
+});
+
+describe("the fan-out stage", () => {
+  it("runs the expansion and measures each sub-query", async () => {
+    const audit = await runAudit("acme.test", () => {}, [], undefined, {
+      provider: fakeProvider(),
+    });
+    const fanout = audit.fanout!;
+    expect(fanout).not.toBeNull();
+    expect(fanout.seed).not.toBe("");
+    expect(fanout.measured).toBe(3);
+    expect(fanout.queries.map((query) => query.type)).toEqual([
+      "comparison",
+      "canonicalization",
+      "specification",
+    ]);
+    // The fake answers "best…" with Acme in second place and everything else
+    // without it, so exactly one sub-query reaches the brand.
+    expect(fanout.mentions).toBe(0);
+    expect(fanout.coverage).toBe(0);
+    expect(fanout.byType.map((row) => row.type)).toEqual([
+      "canonicalization",
+      "specification",
+      "comparison",
+    ]);
+    expect(fanout.answeredBy[0]).toEqual({
+      domain: "g2.com",
+      count: 3,
+      own: false,
+    });
+    // Competitors come from the same reader the prompts use.
+    expect(fanout.queries.some((query) => query.competitors.length)).toBe(true);
+  });
+
+  it("records which queries the search tool actually typed", async () => {
+    const audit = await runAudit("acme.test", () => {}, [], undefined, {
+      provider: fakeProvider({
+        ask: async () => ({
+          value: {
+            answer: "1. Apollo",
+            sources: [],
+            queries: ["b2b data vendors 2026", "B2B Data Vendors 2026"],
+          },
+          usage: {},
+          durationMs: 1,
+        }),
+      }),
+    });
+    expect(audit.visibility!.prompts[0].issuedQueries).toEqual([
+      "b2b data vendors 2026",
+      "B2B Data Vendors 2026",
+    ]);
+    // De-duplicated case-insensitively on the way into the summary.
+    expect(audit.fanout!.issued).toEqual(["b2b data vendors 2026"]);
+  });
+
+  it("says why it skipped rather than reporting a silent zero", async () => {
+    const audit = await runAudit("acme.test", () => {}, [], undefined, {
+      provider: fakeProvider({
+        ask: async () => {
+          throw new GroundingUnavailableError("no grounding here");
+        },
+      }),
+    });
+    expect(audit.fanout!.measured).toBe(0);
+    expect(audit.fanout!.coverage).toBeNull();
+    expect(audit.fanout!.engineNote).toContain("live search was unavailable");
+  });
+
+  it("keeps the audit alive when the expansion itself fails", async () => {
+    const audit = await runAudit("acme.test", () => {}, [], undefined, {
+      provider: fakeProvider({
+        expandFanout: async () => {
+          throw new Error("model said no");
+        },
+      }),
+    });
+    expect(audit.status).toBe("complete");
+    expect(audit.fanout!.engineNote).toContain("model said no");
+    expect(audit.visibility!.measured).toBeGreaterThan(0);
   });
 });

@@ -4,4 +4,6 @@ export * from "./readiness";
 export * from "./visibility";
 export * from "./actions";
 export * from "./fix-prompt";
+export * from "./fanout";
+export * from "./board";
 export * from "./journey";

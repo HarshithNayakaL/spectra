@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 import {
   buildActions,
   buildLlmsTxt,
+  citedOwnDomain,
   deriveIdentity,
   evaluateReadiness,
+  fanoutCompetitors,
   findOrganization,
   isOwnDomain,
   isPlatform,
@@ -11,6 +13,7 @@ import {
   mentions,
   normaliseSources,
   recognises,
+  summariseFanout,
   summariseVisibility,
   type BrandMatcher,
 } from "@spectra/evaluation";
@@ -26,6 +29,7 @@ import {
   SCHEMA_VERSION,
   type Audit,
   type Engine,
+  type FanoutQuery,
   type PromptKind,
   type PromptResult,
 } from "@spectra/schemas";
@@ -79,6 +83,7 @@ export async function runAudit(
     readiness: null,
     profile: null,
     visibility: null,
+    fanout: null,
     actions: [],
     llmsTxt: null,
     warnings: [],
@@ -235,6 +240,7 @@ export async function runAudit(
         sentiment: null,
         inaccuracies: [],
         sources,
+        issuedQueries: answer.queries.slice(0, 12),
         durationMs: Date.now() - began,
       });
     } catch (error) {
@@ -290,6 +296,146 @@ export async function runAudit(
     }
   }
   publish();
+
+  // 4. Fan-out. An answer engine never searches the question it was asked: it
+  //    expands it into synthetic sub-queries, runs those, and writes one answer
+  //    from what came back. Ranking for the question is therefore not the
+  //    measurement; being reachable for the sub-queries is.
+  const issued = results.flatMap((result) => result.issuedQueries);
+  const seed =
+    customPrompts.find((text) => text.trim().length > 2) ??
+    categoryPrompts[0] ??
+    queue[0]?.text ??
+    "";
+  if (!seed) {
+    // Nothing to expand: no question survived.
+  } else if (engine !== "gemini_search") {
+    audit.fanout = summariseFanout({
+      seed,
+      queries: [],
+      matcher,
+      engine,
+      engineNote:
+        "The fan-out was not run: it measures which sub-queries a live search reaches you on, and live search was unavailable on this run.",
+      issued,
+    });
+  } else {
+    // Each grounded sub-query costs a request plus its pacing interval, so the
+    // width of the fan-out is whatever the remaining budget actually affords.
+    const room = Math.floor((timeLeft() - 45_000) / 9_000);
+    const width = Math.max(0, Math.min(7, room));
+    if (width < 3) {
+      audit.fanout = summariseFanout({
+        seed,
+        queries: [],
+        matcher,
+        engine,
+        engineNote: `The fan-out was not run: only ${Math.max(0, Math.round(timeLeft() / 1000))}s of the time budget was left, and a fan-out narrower than three sub-queries measures nothing.`,
+        issued,
+      });
+    } else {
+      await step(
+        "expanding",
+        `Expanding "${seed}" the way an answer engine does`,
+      );
+      const rows: FanoutQuery[] = [];
+      let note =
+        "Each sub-query below was sent to Gemini with Google Search on, exactly as written. They are synthetic: no reader typed them, the engine invents them.";
+      const publishFanout = () => {
+        audit.fanout = summariseFanout({
+          seed,
+          queries: rows,
+          matcher,
+          engine,
+          engineNote: note,
+          issued: [...issued, ...rows.flatMap((row) => row.issuedQueries)],
+        });
+      };
+      try {
+        const plan = (
+          await provider.expandFanout({ profile: plain, seed, count: width })
+        ).value.slice(0, width);
+        for (const [index, item] of plan.entries()) {
+          const id = `f${index + 1}`;
+          if (timeLeft() < 22_000) {
+            rows.push(blankFanout(id, item));
+            continue;
+          }
+          await step(
+            "expanding",
+            `Sub-query ${index + 1} of ${plan.length}: "${item.query}"`,
+          );
+          const began = Date.now();
+          try {
+            const answer = (await provider.ask(item.query, true)).value;
+            const sources = normaliseSources(answer.sources);
+            rows.push({
+              id,
+              type: item.type,
+              query: item.query,
+              covers: item.covers,
+              status: "ok",
+              answer: answer.answer.slice(0, 4000),
+              mentioned: mentions(answer.answer, matcher),
+              position: listPosition(answer.answer, matcher),
+              cited: citedOwnDomain(sources, audit.host),
+              competitors: [],
+              sources,
+              issuedQueries: answer.queries.slice(0, 8),
+              error: "",
+              durationMs: Date.now() - began,
+            });
+          } catch (error) {
+            const permanent =
+              error instanceof PermanentModelError ||
+              error instanceof GroundingUnavailableError;
+            rows.push({
+              ...blankFanout(id, item),
+              status: "error",
+              error: messageOf(error),
+              durationMs: Date.now() - began,
+            });
+            if (permanent) {
+              note = `The fan-out stopped early: ${messageOf(error)}.`;
+              for (const [rest, next] of plan.slice(index + 1).entries())
+                rows.push(blankFanout(`f${index + 2 + rest}`, next));
+              break;
+            }
+          }
+          publishFanout();
+          await saveAudit(audit).catch(() => {});
+        }
+        // Who answered instead. One call over every sub-answer, and only when
+        // the budget still allows it.
+        const answeredRows = rows.filter((row) => row.status === "ok");
+        if (answeredRows.length && timeLeft() > 18_000)
+          try {
+            const analysis = (
+              await provider.analyseAnswers(
+                plain,
+                answeredRows.map((row) => ({
+                  id: row.id,
+                  prompt: row.query,
+                  answer: row.answer,
+                })),
+              )
+            ).value;
+            for (const item of analysis) {
+              const row = rows.find((candidate) => candidate.id === item.id);
+              if (row)
+                row.competitors = fanoutCompetitors(item.competitors, matcher);
+            }
+          } catch (error) {
+            audit.warnings.push(
+              `The fan-out's competitor read did not finish (${messageOf(error)}); its coverage numbers are still measured.`,
+            );
+          }
+      } catch (error) {
+        note = `The question could not be expanded (${messageOf(error)}), so the fan-out was not measured.`;
+      }
+      publishFanout();
+    }
+  }
 
   audit.readiness = evaluateReadiness(scan, identity);
   audit.llmsTxt = buildLlmsTxt(identity, scan.pages);
@@ -347,6 +493,29 @@ function skipped(
     sentiment: null,
     inaccuracies: [],
     sources: [],
+    issuedQueries: [],
+    durationMs: 0,
+  };
+}
+
+function blankFanout(
+  id: string,
+  item: { type: FanoutQuery["type"]; query: string; covers: string },
+): FanoutQuery {
+  return {
+    id,
+    type: item.type,
+    query: item.query,
+    covers: item.covers,
+    status: "skipped",
+    answer: "",
+    mentioned: false,
+    position: null,
+    cited: false,
+    competitors: [],
+    sources: [],
+    issuedQueries: [],
+    error: "",
     durationMs: 0,
   };
 }

@@ -28,6 +28,7 @@ import {
   type Mood,
   type PageState,
 } from "./avatar/Cloudee";
+import { BoardSection, FanoutSection } from "./Board";
 import { JourneyPage } from "./Journey";
 import { Picker } from "./Picker";
 import { API, modelBadge, modelMeta, useModels, type ModelOption } from "./api";
@@ -294,6 +295,11 @@ const STEPS = [
       "Your questions plus the ones buyers ask about your category go to Gemini with live Google Search, the retrieval behind AI Mode.",
   },
   {
+    name: "Fan the question out",
+    detail:
+      "An engine never searches your question. We expand it into the synthetic sub-queries it would issue and run each one, so you see which kinds reach you and which never do.",
+  },
+  {
     name: "Read the answer",
     detail:
       "Were you named? At what rank? Which competitors and which sources were used instead? What did it get wrong?",
@@ -469,7 +475,7 @@ function Landing({
               {latest?.message ?? "Connecting to the site"}
             </p>
             <ol className="liveSteps">
-              {["scanning", "profiling", "asking", "analysing"].map((s) => (
+              {["scanning", "profiling", "asking", "expanding"].map((s) => (
                 <li
                   key={s}
                   data-state={
@@ -575,19 +581,28 @@ function stageLabel(stage: string) {
       profiling: "Profiling",
       asking: "Asking Gemini",
       analysing: "Reading answers",
+      expanding: "Fanning out",
     }[stage] ?? stage
   );
 }
 
 /* ================================================================ report */
 
-const SECTIONS = [
-  { id: "questions", label: "Buyer questions" },
-  { id: "competitors", label: "Competitors & sources" },
-  { id: "fixes", label: "Fix list" },
-  { id: "checks", label: "Readiness checks" },
-  { id: "pages", label: "Pages scanned" },
-];
+/**
+ * The rail lists what this report actually contains. A section that did not
+ * run has no anchor to jump to, so it is not offered.
+ */
+function sectionsOf(audit: Audit) {
+  return [
+    { id: "board", label: "Where it stands" },
+    ...(audit.fanout ? [{ id: "fanout", label: "Fan-out" }] : []),
+    { id: "questions", label: "Buyer questions" },
+    { id: "competitors", label: "Competitors & sources" },
+    { id: "fixes", label: "Fix list" },
+    { id: "checks", label: "Readiness checks" },
+    { id: "pages", label: "Pages scanned" },
+  ];
+}
 
 function Report({
   audit,
@@ -598,7 +613,8 @@ function Report({
 }) {
   const v = audit.visibility;
   const r = audit.readiness;
-  const active = useActiveSection(SECTIONS.map((s) => s.id));
+  const sections = useMemo(() => sectionsOf(audit), [audit]);
+  const active = useActiveSection(sections.map((s) => s.id));
   useEffect(() => {
     const tab = document.querySelector<HTMLElement>(
       `.railNav a[href="#${active}"]`,
@@ -657,7 +673,7 @@ function Report({
           <a href="#overview" aria-current={active === "overview"}>
             Overview
           </a>
-          {SECTIONS.map((s) => (
+          {sections.map((s) => (
             <a key={s.id} href={`#${s.id}`} aria-current={active === s.id}>
               {s.label}
             </a>
@@ -797,6 +813,8 @@ function Report({
           )}
         </div>
 
+        <BoardSection audit={audit} />
+        <FanoutSection audit={audit} />
         <Questions audit={audit} />
         <Competitors audit={audit} />
         <Fixes audit={audit} />

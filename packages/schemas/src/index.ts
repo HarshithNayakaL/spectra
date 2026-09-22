@@ -152,6 +152,11 @@ export const promptResultSchema = z.object({
     .default(null),
   inaccuracies: z.array(z.string()).default([]),
   sources: z.array(sourceSchema).default([]),
+  /**
+   * The queries the model's search tool actually typed, which are not the
+   * question we asked: an answer engine fans one question out into several.
+   */
+  issuedQueries: z.array(z.string()).default([]),
   error: z.string().optional(),
   durationMs: z.number().default(0),
 });
@@ -184,6 +189,102 @@ export const visibilitySchema = z.object({
   ),
 });
 
+/* ============================================================ fan-out
+
+   An answer engine does not run your question. It decomposes it into several
+   synthetic sub-queries, fires them at its search tool in parallel, reads what
+   comes back and synthesises one answer. Google calls the expansions "themes";
+   the industry calls the mechanism query fan-out.
+
+   Ranking for the question is therefore not the measurement. Being retrievable
+   for the sub-queries is. This records the fan-out: what was asked on your
+   behalf, what the search tool returned for each one, and which of those you
+   were in.
+   ============================================================ */
+
+/**
+ * The kinds of sub-query an expansion produces, named after the classes in
+ * Google's thematic-search work rather than invented here.
+ */
+export const fanoutTypeSchema = z.enum([
+  /** The same question in different words. */
+  "equivalent",
+  /** The question a reader asks next. */
+  "follow_up",
+  /** A broader version of the question. */
+  "generalization",
+  /** A narrower, more specific version. */
+  "specification",
+  /** The standard way the category is named. */
+  "canonicalization",
+  /** Something the question implies without saying. */
+  "entailment",
+  /** A head-to-head or alternatives question. */
+  "comparison",
+]);
+
+export const fanoutQuerySchema = z.object({
+  id: z.string(),
+  type: fanoutTypeSchema,
+  /** The sub-query, exactly as it was sent. */
+  query: z.string(),
+  /** Which buyer intent this sub-query stands for. */
+  covers: z.string().default(""),
+  status: z.enum(["ok", "error", "skipped"]),
+  answer: z.string().default(""),
+  mentioned: z.boolean().default(false),
+  /** 1-based rank among the brands the sub-answer recommends. */
+  position: z.number().int().positive().nullable().default(null),
+  cited: z.boolean().default(false),
+  competitors: z.array(z.string()).default([]),
+  sources: z.array(sourceSchema).default([]),
+  /** What the search tool typed for this sub-query. */
+  issuedQueries: z.array(z.string()).default([]),
+  error: z.string().default(""),
+  durationMs: z.number().default(0),
+});
+
+export const fanoutSchema = z.object({
+  /** The question that was expanded. */
+  seed: z.string(),
+  engine: engineSchema,
+  engineNote: z.string().default(""),
+  queries: z.array(fanoutQuerySchema).default([]),
+  measured: z.number().int().default(0),
+  /** Sub-queries whose answer named the brand. */
+  mentions: z.number().int().default(0),
+  /** Sub-queries whose answer used the brand's own site as a source. */
+  cited: z.number().int().default(0),
+  /** Share of measured sub-queries that reached the brand at all, 0-100. */
+  coverage: z.number().min(0).max(100).nullable().default(null),
+  /** Where the losses are concentrated, by kind of sub-query. */
+  byType: z
+    .array(
+      z.object({
+        type: fanoutTypeSchema,
+        measured: z.number().int(),
+        hits: z.number().int(),
+      }),
+    )
+    .default([]),
+  /** Who answered instead, by domain. */
+  answeredBy: z
+    .array(
+      z.object({
+        domain: z.string(),
+        count: z.number().int(),
+        own: z.boolean(),
+      }),
+    )
+    .default([]),
+  /** Every query the search tool typed across the whole audit, de-duplicated. */
+  issued: z.array(z.string()).default([]),
+});
+
+export type FanoutType = z.infer<typeof fanoutTypeSchema>;
+export type FanoutQuery = z.infer<typeof fanoutQuerySchema>;
+export type Fanout = z.infer<typeof fanoutSchema>;
+
 export const actionSchema = z.object({
   id: z.string(),
   source: z.enum(["readiness", "visibility"]),
@@ -205,6 +306,7 @@ export const auditStatusSchema = z.enum([
   "scanning",
   "profiling",
   "asking",
+  "expanding",
   "analysing",
   "complete",
   "partial",
@@ -227,6 +329,8 @@ export const auditSchema = z.object({
   readiness: readinessSchema.nullable(),
   profile: profileSchema.nullable(),
   visibility: visibilitySchema.nullable(),
+  /** Null on an audit that ran before the fan-out stage existed. */
+  fanout: fanoutSchema.nullable().default(null),
   actions: z.array(actionSchema).default([]),
   llmsTxt: z.string().nullable().default(null),
   warnings: z.array(z.string()).default([]),
