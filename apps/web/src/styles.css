@@ -739,7 +739,8 @@ svg {
 .fieldRow {
   margin-bottom: 16px;
 }
-.fieldRow label {
+.fieldRow label,
+.fieldRow .fieldLabel {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -2159,7 +2160,8 @@ svg {
   .heroLede {
     margin-bottom: 24px;
   }
-  .fieldRow label {
+  .fieldRow label,
+  .fieldRow .fieldLabel {
     flex-direction: column;
     align-items: flex-start;
     gap: 5px;
@@ -2461,5 +2463,750 @@ svg {
   }
   .cellSteps .steps4 li {
     padding: 14px 0;
+  }
+}
+
+/* ============================================================
+   Header navigation
+   Two halves of one instrument, named rather than iconised.
+   ============================================================ */
+.topNav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: auto;
+  margin-left: 26px;
+}
+.topNav a {
+  position: relative;
+  padding: 6px 11px;
+  border-radius: 9px;
+  color: var(--ink-3);
+  font: 600 var(--t-small) / 1 var(--mono);
+  letter-spacing: 0.04em;
+  text-decoration: none;
+  transition: color var(--quick) var(--ease);
+}
+.topNav a:hover {
+  color: var(--ink);
+}
+.topNav a[aria-current="page"] {
+  color: var(--ink);
+  background: var(--field);
+}
+.topNav a[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  right: 11px;
+  bottom: -1px;
+  left: 11px;
+  height: 2px;
+  background: var(--ink);
+}
+
+/* ============================================================
+   Picker — the product's own drop-down
+   A button, a list, and a tick. Rules and weight carry the state;
+   the only colour is the signal on a badge.
+   ============================================================ */
+.picker {
+  position: relative;
+}
+.pickerButton {
+  width: 100%;
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px 9px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  color: var(--ink-3);
+  background: var(--field);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: inset 0 2px 4px oklch(0.2 0.01 265 / 0.05);
+  transition:
+    border-color var(--quick) var(--ease),
+    box-shadow var(--quick) var(--ease);
+}
+.pickerButton:hover:not(:disabled) {
+  border-color: var(--ink-3);
+}
+.pickerButton:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.picker.open .pickerButton,
+.pickerButton:focus-visible {
+  border-color: var(--ink);
+  box-shadow:
+    inset 0 2px 4px oklch(0.2 0.01 265 / 0.05),
+    0 0 0 3px color-mix(in oklch, var(--ink) 14%, transparent);
+}
+.pickerValue {
+  min-width: 0;
+  flex: 1;
+  display: block;
+}
+.pickerValueLabel {
+  display: block;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--t-body);
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pickerValueMeta {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--ink-3);
+  font-size: var(--t-micro);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pickerBadge {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--signal);
+  background: var(--signal-field);
+  font: 700 var(--t-micro) / 1.3 var(--mono);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+.pickerCaret {
+  flex: none;
+  color: var(--ink-3);
+  transition: transform var(--base) var(--ease);
+}
+.picker.open .pickerCaret {
+  transform: rotate(180deg);
+}
+.pickerList {
+  position: absolute;
+  z-index: var(--z-bar);
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  max-height: 300px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--ink);
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow: var(--lift-2);
+  animation: pickerIn var(--quick) var(--ease);
+}
+.pickerList.up {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+.pickerList:focus-visible {
+  outline: 0;
+}
+@keyframes pickerIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.pickerOption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.pickerOption + .pickerOption {
+  box-shadow: inset 0 1px 0 var(--rule-faint);
+}
+.pickerOption.active {
+  background: var(--field);
+  box-shadow: none;
+}
+.pickerOption.active + .pickerOption {
+  box-shadow: none;
+}
+.pickerOptionMain {
+  min-width: 0;
+  flex: 1;
+}
+.pickerOptionLabel {
+  display: block;
+  font-size: var(--t-body);
+  font-weight: 500;
+  line-height: 1.3;
+}
+.pickerOptionMeta {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink-3);
+  font-size: var(--t-micro);
+  line-height: 1.4;
+}
+.pickerTick {
+  flex: none;
+  width: 14px;
+  color: var(--ink);
+  font-size: var(--t-small);
+  text-align: right;
+}
+.pickerOption[aria-selected="true"] .pickerOptionLabel {
+  font-weight: 600;
+}
+
+/* ============================================================
+   Journey — the entry point on the audit landing
+   ============================================================ */
+.cellJourney {
+  grid-column: span 5;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-decoration: none;
+  transition:
+    transform var(--base) var(--ease),
+    box-shadow var(--base) var(--ease);
+}
+.cellJourney:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--lift-2);
+}
+.journeyPitch {
+  font-size: var(--t-h3);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.cellJourney p {
+  max-width: 44ch;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--t-small);
+}
+.journeyGo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 6px;
+  font: 600 var(--t-small) / 1 var(--mono);
+}
+.cellJourney:hover .journeyGo svg {
+  transform: translateX(3px);
+  transition: transform var(--base) var(--ease);
+}
+
+/* ============================================================
+   Journey — live pane
+   ============================================================ */
+.jVerdictWord {
+  margin: 2px 0 6px;
+  font-family: var(--display);
+  font-size: clamp(2.2rem, 4.4vw, 3.1rem);
+  font-variation-settings: "ROND" 24;
+  font-weight: 800;
+  line-height: 0.9;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+}
+.jTicks {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  font: 500 var(--t-data) / 1.6 var(--mono);
+}
+.jTicks li {
+  display: flex;
+  gap: 10px;
+  overflow: hidden;
+  padding: 3px 0;
+  color: oklch(1 0 0 / 0.66);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  animation: tickIn var(--base) var(--ease);
+}
+.jTicks li span {
+  color: oklch(1 0 0 / 0.42);
+}
+.jTicks li[data-action="answer"],
+.jTicks li[data-action="giveup"] {
+  color: var(--paper);
+  font-weight: 600;
+}
+@keyframes tickIn {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+}
+
+/* ============================================================
+   Journey — the report
+   ============================================================ */
+.jReport {
+  max-width: 1280px;
+  margin: 8px auto 0;
+}
+.jVerdict {
+  display: flex;
+  flex-direction: column;
+}
+.jBig {
+  margin: 4px 0 8px;
+  font-family: var(--display);
+  font-size: clamp(2.6rem, 5vw, 3.9rem);
+  font-variation-settings: "ROND" 24;
+  font-weight: 800;
+  line-height: 0.88;
+  text-transform: uppercase;
+}
+.jVerdict.good .jBig {
+  color: oklch(0.42 0.12 150);
+}
+.jVerdict.bad .jBig {
+  color: var(--signal);
+}
+.jVerdictLine {
+  max-width: 62ch;
+  margin: 0;
+  color: var(--ink-2);
+}
+.jAnswer {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+}
+.jAnswer b {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--ink-3);
+  font: 600 var(--t-micro) / 1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.jAnswer p {
+  margin: 0;
+  font-size: var(--t-small);
+  line-height: 1.6;
+}
+.jAnswerLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: var(--t-data);
+}
+.jBlockerLine {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border-left: 2px solid var(--signal);
+  background: var(--signal-field);
+  color: var(--ink);
+  font-size: var(--t-small);
+}
+.jMetrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  margin: 10px 0 0;
+}
+.jMetric {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule-faint);
+}
+.jMetric dt {
+  color: var(--ink-2);
+  font-size: var(--t-small);
+}
+.jMetric dd {
+  margin: 0;
+  font-size: var(--t-body);
+  font-weight: 600;
+}
+.jMetric.bad dd {
+  color: var(--signal);
+}
+.jMetric:nth-child(odd) {
+  padding-right: 18px;
+}
+.jIdentity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 14px 0 0;
+  color: var(--ink-3);
+  font-size: var(--t-data);
+}
+.jIdentity span + span::before {
+  content: "·";
+  margin-right: 14px;
+}
+
+/* The trail: one row per request, in order. */
+.jSteps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--card-edge);
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: var(--lift-1);
+  overflow: hidden;
+}
+.jStep + .jStep {
+  border-top: 1px solid var(--rule-faint);
+}
+.jStep > button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 30px 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 18px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.jStep > button:disabled {
+  cursor: default;
+}
+.jStep > button:hover:not(:disabled) {
+  background: var(--field);
+}
+.jStepIndex {
+  color: var(--ink-3);
+  font-size: var(--t-data);
+}
+.jStepAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-2);
+  font: 700 var(--t-micro) / 1.2 var(--mono);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.jStep[data-action="answer"] .jStepAction,
+.jStep[data-action="giveup"] .jStepAction {
+  color: var(--ink);
+}
+.jStepBody {
+  min-width: 0;
+}
+.jStepWhere {
+  display: block;
+  overflow: hidden;
+  font-size: var(--t-body);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.jStepWhere a {
+  text-decoration-color: var(--rule);
+  text-underline-offset: 3px;
+}
+.jStepRedirect {
+  margin-left: 8px;
+  color: var(--ink-3);
+  font-size: var(--t-data);
+}
+.jStepTitle {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--ink-3);
+  font-size: var(--t-data);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.jStepFacts {
+  display: flex;
+  gap: 12px;
+  color: var(--ink-2);
+  font-size: var(--t-data);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.jStepFacts .bad {
+  color: var(--signal);
+}
+.jStepFacts .ok {
+  color: oklch(0.42 0.12 150);
+}
+.jStepFlags {
+  grid-column: 3 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.jStepFlags .chip {
+  margin-left: 0;
+}
+.jStep.flagged .jStepIndex {
+  color: var(--signal);
+}
+.jStepDetail {
+  padding: 2px 18px 18px 122px;
+}
+.jStepDetail p {
+  max-width: 78ch;
+  margin: 0 0 8px;
+  font-size: var(--t-small);
+  line-height: 1.6;
+}
+.jStepDetail b {
+  color: var(--ink);
+}
+.jStepReason {
+  color: var(--ink-2);
+}
+.jEvidence {
+  max-width: 78ch;
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  border-left: 2px solid var(--ink);
+  background: var(--field);
+  font-size: var(--t-small);
+  line-height: 1.6;
+}
+.jEvidence .mono {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--ink-3);
+  font-size: var(--t-micro);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.jStepPending .jStepReason {
+  display: block;
+  padding: 13px 18px;
+  color: var(--ink-3);
+  font-size: var(--t-small);
+}
+
+/* What to fix. */
+.jIssues {
+  display: grid;
+  gap: 10px;
+}
+.jIssue {
+  border: 1px solid var(--card-edge);
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: var(--lift-1);
+  overflow: hidden;
+}
+.jIssue > button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 15px 20px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.jIssue > button:hover {
+  background: var(--field);
+}
+.prio.blocker {
+  color: var(--signal);
+  background: var(--signal-field);
+}
+.prio.friction {
+  color: var(--ink);
+  background: var(--field);
+}
+.prio.note {
+  color: var(--ink-3);
+  background: var(--field);
+}
+.jIssueTitle {
+  min-width: 0;
+  font-weight: 600;
+}
+.jIssueDetail {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink-2);
+  font-size: var(--t-small);
+  font-weight: 400;
+  line-height: 1.5;
+}
+.jIssueStep {
+  color: var(--ink-3);
+  font-size: var(--t-data);
+  white-space: nowrap;
+}
+.jIssueBody {
+  padding: 0 20px 18px 118px;
+}
+.jIssueBody p {
+  max-width: 78ch;
+  margin: 0 0 8px;
+  font-size: var(--t-small);
+  line-height: 1.6;
+}
+.jNotes {
+  margin-top: 16px;
+}
+
+@media (width < 62rem) {
+  .cellJourney {
+    grid-column: span 12;
+  }
+}
+@media (width < 40rem) {
+  .topNav {
+    margin-left: 10px;
+  }
+  .topNav a {
+    padding: 6px 8px;
+  }
+  /* The header now carries a nav too. On a phone the measurement credit keeps
+     its mark and drops its words, rather than pushing the row past the edge. */
+  .topShort {
+    display: none;
+  }
+  .topMeta {
+    gap: 0;
+  }
+  .pickerButton {
+    min-height: 54px;
+  }
+  .pickerValueLabel {
+    font-size: 1rem;
+  }
+  .pickerList {
+    max-height: min(60dvh, 340px);
+  }
+  .pickerOption {
+    min-height: 48px;
+  }
+  .jMetrics {
+    grid-template-columns: 1fr;
+  }
+  .jMetric:nth-child(odd) {
+    padding-right: 0;
+  }
+  .jStep > button {
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 4px 10px;
+    padding: 14px 16px;
+  }
+  .jStepAction {
+    grid-column: 2;
+    grid-row: 1;
+    font-size: 0.625rem;
+  }
+  .jStepBody {
+    grid-column: 2;
+  }
+  .jStepIndex {
+    grid-row: 1 / span 2;
+    align-self: start;
+    padding-top: 2px;
+  }
+  .jStepFacts {
+    grid-column: 2;
+    gap: 10px;
+  }
+  .jStepFlags {
+    grid-column: 2;
+  }
+  .jStepDetail {
+    padding: 0 16px 16px;
+  }
+  .jIssue > button {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 12px;
+    padding: 14px 16px;
+  }
+  .prio.blocker,
+  .prio.friction,
+  .prio.note {
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: start;
+  }
+  .jIssueTitle {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .jIssueStep {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .jIssueBody {
+    padding: 0 16px 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pickerList,
+  .jTicks li {
+    animation: none;
+  }
+  .pickerCaret,
+  .cellJourney,
+  .cellJourney:hover .journeyGo svg {
+    transition: none;
+  }
+  .cellJourney:hover {
+    transform: none;
+  }
+}
+
+/* The journey report's own head: the site, the job, and a way back. */
+.jReport {
+  padding-top: 8px;
+}
+.jReportHead {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 28px;
+}
+.jReportHead > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 28px;
+}
+.jReportHead .btn {
+  flex: none;
+}
+.jVerdict.live .jBig {
+  color: var(--ink-3);
+}
+@media (width < 40rem) {
+  .jReportHead {
+    align-items: flex-start;
+  }
+}
+
+/* WCAG 2.2 target size: the path links inside a trail row and an issue body
+   are short, so on a touch screen they are padded up to 24px rather than left
+   at the height of their own text. */
+@media (pointer: coarse) {
+  .jStepWhere a,
+  .jAnswerLink,
+  .jIssueBody .checkUrls a {
+    display: inline-block;
+    min-width: 24px;
+    padding: 4px 0;
   }
 }

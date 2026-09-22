@@ -253,3 +253,206 @@ export type Action = z.infer<typeof actionSchema>;
 export type IntentRequest = z.infer<typeof intentRequestSchema>;
 export type AuditStatus = z.infer<typeof auditStatusSchema>;
 export type Audit = z.infer<typeof auditSchema>;
+
+/* ============================================================ journey
+
+   A journey is one AI agent trying to do one job on a site, recorded move by
+   move. It answers a different question from an audit: not "does the model
+   know you exist" but "can an agent that arrives with a task actually finish
+   it here". Every step keeps the response it was built from, so a failure can
+   be located at the hop that caused it.
+   ============================================================ */
+
+/** The job handed to the agent. Presets carry a verifier; custom text does not. */
+export const journeyIntentSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  task: z.string(),
+  custom: z.boolean().default(false),
+});
+
+/** What the agent did on one step. */
+export const journeyActionSchema = z.enum([
+  "fetch",
+  "search",
+  "answer",
+  "giveup",
+]);
+
+export const journeyIssueCodeSchema = z.enum([
+  "robots_blocked",
+  "firewall_blocked",
+  "auth_wall",
+  "not_found",
+  "server_error",
+  "unreachable",
+  "javascript_only",
+  "thin_content",
+  "slow_response",
+  "wrong_content_type",
+  "redirected",
+  "left_the_site",
+  "no_route",
+  "unverified_answer",
+  "budget_exhausted",
+]);
+
+export const journeyIssueSchema = z.object({
+  code: journeyIssueCodeSchema,
+  severity: z.enum(["blocker", "friction", "note"]),
+  /** 1-based step this was observed on; null when it is about the run itself. */
+  step: z.number().int().nullable().default(null),
+  url: z.string().default(""),
+  /** What was actually observed. */
+  detail: z.string(),
+  /** Why it matters to an agent. */
+  why: z.string(),
+  /** What to change on the site. */
+  fix: z.string(),
+});
+
+export const journeyStepSchema = z.object({
+  n: z.number().int(),
+  action: journeyActionSchema,
+  url: z.string().default(""),
+  query: z.string().default(""),
+  /** The agent's own stated reason for the move, before it was carried out. */
+  reason: z.string().default(""),
+  status: z.number().int().nullable().default(null),
+  finalUrl: z.string().default(""),
+  contentType: z.string().default(""),
+  ms: z.number().default(0),
+  bytes: z.number().int().default(0),
+  words: z.number().int().default(0),
+  title: z.string().default(""),
+  /** What the agent took from the response, in its own words. */
+  found: z.string().default(""),
+  /** Literal text from the page that satisfies the intent, when any does. */
+  evidence: z.string().default(""),
+  issues: z.array(journeyIssueCodeSchema).default([]),
+  error: z.string().default(""),
+  /** Milliseconds since the journey started. */
+  at: z.number().default(0),
+});
+
+export const journeyOutcomeSchema = z.enum([
+  "completed",
+  "partial",
+  "stalled",
+  "blocked",
+  "failed",
+]);
+
+export const journeyStatusSchema = z.enum([
+  "queued",
+  "starting",
+  "walking",
+  "reading",
+  "complete",
+  "failed",
+]);
+
+export const journeyMetricsSchema = z.object({
+  steps: z.number().int().default(0),
+  fetches: z.number().int().default(0),
+  searches: z.number().int().default(0),
+  blocked: z.number().int().default(0),
+  broken: z.number().int().default(0),
+  bytes: z.number().int().default(0),
+  /** Total time spent waiting on the site, not on the model. */
+  siteMs: z.number().default(0),
+  slowestMs: z.number().default(0),
+  blockers: z.number().int().default(0),
+  friction: z.number().int().default(0),
+});
+
+export const journeySchema = z.object({
+  id: z.string(),
+  version: z.literal(SCHEMA_VERSION),
+  target: z.string(),
+  host: z.string(),
+  status: journeyStatusSchema,
+  stage: z.string().default(""),
+  createdAt: z.string(),
+  completedAt: z.string().nullable(),
+  durationMs: z.number().default(0),
+  model: z.string(),
+  intent: journeyIntentSchema,
+  /** The crawler the agent identified itself as, and the exact string sent. */
+  agent: z.object({ name: z.string(), userAgent: z.string() }),
+  /** Who chose each move: Gemini, or the built-in deterministic walker. */
+  navigator: z.enum(["gemini", "heuristic"]),
+  outcome: journeyOutcomeSchema.nullable().default(null),
+  /** The agent's answer to the task, when it produced one. */
+  answer: z.string().default(""),
+  answerUrl: z.string().default(""),
+  /** Page text that independently confirms the answer, when it was found. */
+  verified: z.boolean().default(false),
+  steps: z.array(journeyStepSchema).default([]),
+  issues: z.array(journeyIssueSchema).default([]),
+  metrics: journeyMetricsSchema,
+  warnings: z.array(z.string()).default([]),
+  error: z.string().nullable().default(null),
+});
+
+export type JourneyIntent = z.infer<typeof journeyIntentSchema>;
+export type JourneyAction = z.infer<typeof journeyActionSchema>;
+export type JourneyIssueCode = z.infer<typeof journeyIssueCodeSchema>;
+export type JourneyIssue = z.infer<typeof journeyIssueSchema>;
+export type JourneyStep = z.infer<typeof journeyStepSchema>;
+export type JourneyOutcome = z.infer<typeof journeyOutcomeSchema>;
+export type JourneyStatus = z.infer<typeof journeyStatusSchema>;
+export type JourneyMetrics = z.infer<typeof journeyMetricsSchema>;
+export type Journey = z.infer<typeof journeySchema>;
+
+/**
+ * One move, as the navigator returns it. Model output is validated against
+ * this before anything is fetched, so a hallucinated field cannot reach the
+ * network layer.
+ */
+export const navigatorMoveSchema = z.object({
+  action: journeyActionSchema,
+  /** Absolute URL for a fetch. Ignored for every other action. */
+  url: z.string().default(""),
+  /** Search terms for a search. Ignored for every other action. */
+  query: z.string().default(""),
+  /** Why this move, in one sentence, before it is carried out. */
+  reason: z.string().default(""),
+  /** What the previous response gave the agent, in one sentence. */
+  found: z.string().default(""),
+  /** The answer to the task, on an answer move. */
+  answer: z.string().default(""),
+});
+
+export type NavigatorMove = z.infer<typeof navigatorMoveSchema>;
+
+/** Everything the navigator is allowed to see when it chooses a move. */
+export type NavigatorContext = {
+  task: string;
+  host: string;
+  startUrl: string;
+  /** Steps so far, oldest first. */
+  trail: Array<{
+    n: number;
+    action: JourneyAction;
+    url: string;
+    query: string;
+    status: number | null;
+    title: string;
+    words: number;
+    found: string;
+    issues: JourneyIssueCode[];
+    error: string;
+  }>;
+  /** The page the agent is standing on, already stripped of scripts. */
+  current: {
+    url: string;
+    title: string;
+    description: string;
+    headings: string[];
+    text: string;
+    links: Array<{ href: string; text: string }>;
+  } | null;
+  fetchesLeft: number;
+  searchesLeft: number;
+};

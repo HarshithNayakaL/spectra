@@ -9,7 +9,15 @@ import {
   listModels,
 } from "./models";
 import { runAudit } from "./audit";
-import { getAudit, storeKind } from "./store";
+import {
+  DEFAULT_AGENT,
+  JOURNEY_AGENTS,
+  JourneyError,
+  resolveIntent,
+  runJourney,
+} from "./journey";
+import { JOURNEY_INTENTS } from "@spectra/evaluation";
+import { getAudit, getJourney, storeKind } from "./store";
 
 export const app = new Hono();
 const allowedOrigins = new Set(
@@ -24,7 +32,11 @@ const allowedOrigins = new Set(
 const MAX_CONCURRENT_AUDITS = Number(
   process.env.SPECTRA_MAX_CONCURRENT_AUDITS || 3,
 );
+const MAX_CONCURRENT_JOURNEYS = Number(
+  process.env.SPECTRA_MAX_CONCURRENT_JOURNEYS || 4,
+);
 let running = 0;
+let walking = 0;
 
 app.use(
   "/api/*",
@@ -41,6 +53,7 @@ app.get("/api/health", (c) =>
     storage: storeKind,
     runtime: process.env.VERCEL ? "vercel" : "node",
     runningAudits: running,
+    runningJourneys: walking,
   }),
 );
 /**
@@ -146,6 +159,135 @@ app.post("/api/audits", async (c) => {
     },
     cancel() {
       // The consumer walked away; the audit keeps running to completion.
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "content-type": "application/x-ndjson",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    },
+  });
+});
+
+/**
+ * The jobs a journey can be given and the agents it can be run as. Static, but
+ * served from here so the picker never drifts from what the runner accepts.
+ */
+app.get("/api/journeys/catalogue", (c) =>
+  c.json({
+    intents: JOURNEY_INTENTS.map((intent) => ({
+      id: intent.id,
+      label: intent.label,
+      task: intent.task,
+    })),
+    agents: JOURNEY_AGENTS.map((agent) => ({
+      name: agent.name,
+      label: agent.label,
+    })),
+    defaultAgent: DEFAULT_AGENT,
+  }),
+);
+app.get("/api/journeys/:id", async (c) => {
+  const journey = await getJourney(c.req.param("id"));
+  return journey
+    ? c.json(journey)
+    : c.json({ error: "Journey not found" }, 404);
+});
+/**
+ * Runs one agent against one site with one job, streaming the journey after
+ * every move so the page can be watched rather than waited on.
+ */
+app.post("/api/journeys", async (c) => {
+  const parsed = z
+    .object({
+      url: z.string().min(1).max(2048),
+      intent: z.string().min(1).max(40).default("pricing"),
+      /** Only read when intent is "custom". */
+      task: z.string().trim().max(280).default(""),
+      agent: z.string().min(1).max(60).default(DEFAULT_AGENT),
+      model: z
+        .string()
+        .refine(isValidModelId, "Unrecognised model id")
+        .default(DEFAULT_MODEL),
+    })
+    .safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success)
+    return c.json(
+      {
+        error:
+          parsed.error.issues[0]?.path[0] === "model"
+            ? "That model is not available."
+            : "A URL and a job are required.",
+      },
+      400,
+    );
+  const intent = resolveIntent(parsed.data.intent, parsed.data.task);
+  if (!intent)
+    return c.json(
+      {
+        error:
+          parsed.data.intent === "custom"
+            ? "Describe the job in at least three characters."
+            : "That job is not one SPECTRA can run.",
+      },
+      400,
+    );
+  const target = readableTarget(parsed.data.url);
+  if (!target.ok) return c.json({ error: target.error }, 400);
+  if (walking >= MAX_CONCURRENT_JOURNEYS)
+    return c.json(
+      { error: "Too many journeys are already running. Try again shortly." },
+      503,
+    );
+
+  walking += 1;
+  const stream = new ReadableStream({
+    async start(controller) {
+      let open = true;
+      const write = (payload: unknown) => {
+        if (!open) return;
+        try {
+          controller.enqueue(
+            new TextEncoder().encode(JSON.stringify(payload) + "\n"),
+          );
+        } catch {
+          open = false;
+        }
+      };
+      try {
+        write({
+          type: "result",
+          journey: await runJourney(
+            target.value,
+            intent,
+            (snapshot) => write({ type: "progress", journey: snapshot }),
+            parsed.data.model,
+            parsed.data.agent,
+          ),
+        });
+      } catch (error) {
+        write({
+          type: "error",
+          message:
+            error instanceof JourneyError
+              ? error.message
+              : error instanceof Error
+                ? error.message
+                : "The journey failed.",
+        });
+      } finally {
+        walking -= 1;
+        open = false;
+        try {
+          controller.close();
+        } catch {
+          // The client walked away first.
+        }
+      }
+    },
+    cancel() {
+      // The journey keeps running to completion and stays reachable by id.
     },
   });
   return new Response(stream, {

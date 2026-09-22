@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { profileSchema, type Profile } from "@spectra/schemas";
+import {
+  navigatorMoveSchema,
+  profileSchema,
+  type NavigatorContext,
+  type NavigatorMove,
+  type Profile,
+} from "@spectra/schemas";
 
 type Usage = { inputTokens?: number; outputTokens?: number };
 export type Result<T> = { value: T; usage: Usage; durationMs: number };
@@ -42,6 +48,17 @@ export interface ModelProvider {
     items: Array<{ id: string; prompt: string; answer: string }>,
   ): Promise<Result<AnswerAnalysis[]>>;
 }
+/**
+ * The half of the provider a journey needs: choose the next move, and search
+ * when the site itself offers no route. Kept separate from ModelProvider so an
+ * audit is not obliged to know how to walk a site.
+ */
+export interface AgentProvider {
+  readonly model: string;
+  navigate(context: NavigatorContext): Promise<Result<NavigatorMove>>;
+  ask(query: string, grounded: boolean): Promise<Result<Answer>>;
+}
+
 export class GroundingUnavailableError extends Error {}
 /** The request could not finish before the caller's deadline. */
 export class DeadlineError extends Error {}
@@ -77,6 +94,19 @@ const siteProfileResponseSchema = {
     "brandedPrompts",
   ],
 };
+const moveResponseSchema = {
+  type: "object",
+  properties: {
+    action: { type: "string", enum: ["fetch", "search", "answer", "giveup"] },
+    url: { type: "string" },
+    query: { type: "string" },
+    reason: { type: "string" },
+    found: { type: "string" },
+    answer: { type: "string" },
+  },
+  required: ["action", "url", "query", "reason", "found", "answer"],
+};
+
 const analysisSchema = z.object({
   answers: z.array(
     z.object({
@@ -112,7 +142,7 @@ const analysisResponseSchema = {
   required: ["answers"],
 };
 
-export class GeminiProvider implements ModelProvider {
+export class GeminiProvider implements ModelProvider, AgentProvider {
   readonly model: string;
   private nextRequestAt = 0;
   // Serverless has a hard wall clock, so pacing and retries are tighter there.
@@ -202,6 +232,72 @@ ${input.organization ? `ORGANIZATION MARKUP: ${JSON.stringify(input.organization
       usage: usage(data),
       durationMs: Date.now() - started,
     };
+  }
+
+  /**
+   * Chooses the agent's next move. The model is given only what an agent that
+   * cannot run JavaScript would have: the raw text of the page it is standing
+   * on, the links in that HTML, and the trail behind it. It decides where to
+   * go; it never decides whether the site passed.
+   */
+  async navigate(context: NavigatorContext): Promise<Result<NavigatorMove>> {
+    const page = context.current;
+    const links = (page?.links ?? [])
+      .slice(0, 90)
+      .map((link) => `- ${link.text || "(no text)"} -> ${link.href}`)
+      .join("\n");
+    const trail = context.trail.length
+      ? context.trail
+          .map(
+            (step) =>
+              `${step.n}. ${step.action.toUpperCase()} ${step.url || step.query}` +
+              `${step.status === null ? "" : ` -> ${step.status}`}` +
+              `${step.words ? `, ${step.words} words` : ""}` +
+              `${step.issues.length ? `, problems: ${step.issues.join(", ")}` : ""}` +
+              `${step.error ? `, error: ${step.error}` : ""}` +
+              `${step.found ? `\n   took away: ${step.found}` : ""}`,
+          )
+          .join("\n")
+      : "(nothing yet)";
+    return this.structured(
+      `You are an AI agent browsing a website on behalf of a user, exactly as ChatGPT or Perplexity does when it opens a page. You fetch raw HTML over HTTP. You cannot run JavaScript, click, scroll, log in, or fill forms. You only read what the server sent.
+
+THE JOB: ${context.task}
+
+SITE: ${context.host} (started at ${context.startUrl})
+Budget left: ${context.fetchesLeft} page ${context.fetchesLeft === 1 ? "fetch" : "fetches"}, ${context.searchesLeft} web ${context.searchesLeft === 1 ? "search" : "searches"}.
+
+WHAT YOU HAVE DONE
+${trail}
+
+${
+  page
+    ? `THE PAGE YOU ARE ON: ${page.url}
+TITLE: ${page.title}
+DESCRIPTION: ${page.description}
+HEADINGS: ${page.headings.slice(0, 25).join(" | ")}
+TEXT (raw HTML, no JavaScript):
+${page.text.slice(0, 14_000)}
+
+LINKS IN THIS HTML:
+${links || "(none)"}`
+    : "You have not fetched anything yet."
+}
+
+Choose exactly one next move and return it as JSON:
+- "answer": the job is done. Put the answer in "answer", quoting the concrete detail (prices, addresses, steps) from the page. Only answer when a page you actually read carried it.
+- "fetch": read one more URL. Put an absolute URL in "url". Prefer a link listed above. You may guess a conventional path on ${context.host} (for example /pricing) when no link looks right. Never fetch a URL you already fetched, and never leave ${context.host}.
+- "search": you have read the site and the answer is not on it. Put plain search terms in "query". Only use this when fetching cannot help and searches are left.
+- "giveup": the job cannot be done on this site. Say why in "reason".
+
+Also return:
+- "reason": one sentence, why this move.
+- "found": one sentence, what the page you just read gave you. Empty on the first move.
+
+Rules: never claim something the page did not say. A page with almost no text is a dead end, not an answer. If the budget is nearly gone, answer with what you have or give up.`,
+      navigatorMoveSchema,
+      moveResponseSchema,
+    );
   }
 
   async analyseAnswers(

@@ -45,7 +45,7 @@ fixtures/sites           Known website fixtures and expectations
 docs                     Architecture and scoring detail
 ```
 
-The API creates immutable audit snapshots and exposes them at `/api/audits/:id`. The default local store is filesystem-backed for zero-setup development; the relational production model is documented in [docs/architecture.md](docs/architecture.md) and maps directly to PostgreSQL.
+The API creates immutable audit snapshots and exposes them at `/api/audits/:id`, and immutable journey trails at `/api/journeys/:id`. The default local store is filesystem-backed for zero-setup development; the relational production model is documented in [docs/architecture.md](docs/architecture.md) and maps directly to PostgreSQL.
 
 ## End-to-end flow
 
@@ -59,6 +59,49 @@ The API creates immutable audit snapshots and exposes them at `/api/audits/:id`.
 8. Generate retrieval questions from evidence-backed claims; run direct evaluation and optional Google Search grounding.
 9. Calculate `spectra-v0.1` metrics from registered checks and visible denominators.
 10. Diagnose positioning bugs and produce evidence-linked repairs.
+
+## Journey: watching an agent use the site
+
+An audit answers "does an AI system know you exist". A journey answers the next
+question: **can an agent that arrives with a job actually finish it here?**
+
+One agent, one job, one site, recorded move by move. SPECTRA arrives as a real
+answer-engine user-agent (`ChatGPT-User`, `PerplexityBot`, `ClaudeBot`,
+`OAI-SearchBot` or `GPTBot`), reads `robots.txt` for that agent's own token and
+honours it, then walks the site: at most eight page fetches, at most two web
+searches, always on the domain it was pointed at. Gemini chooses each move from
+nothing but the raw text of the page it is standing on, the links that were in
+that HTML, and the trail behind it. It cannot run JavaScript, sign in, submit a
+form or leave the site, because a real agent opening a page cannot.
+
+Every move is a record: the reason the agent gave before it moved, the status,
+latency, byte count and word count that came back, and the problems the response
+carried — `robots_blocked`, `firewall_blocked`, `auth_wall`, `not_found`,
+`javascript_only`, `thin_content`, `slow_response` and the rest. Each problem
+becomes a finding with a severity, the step it was seen on, why an agent cares
+and what to change.
+
+**The verdict is not the agent's opinion.** Each preset job carries its own
+proof — a price, an email address, an API endpoint, a refund window — and the
+outcome is decided by whether a page the agent actually read contained it:
+
+| Outcome     | Meaning                                                                        |
+| ----------- | ------------------------------------------------------------------------------ |
+| `completed` | The agent answered, and a page it read carried the proof.                      |
+| `partial`   | The agent answered, but no page confirmed it. That answer came from the model. |
+| `stalled`   | The site was readable and the agent still could not finish.                    |
+| `blocked`   | No readable page was ever returned.                                            |
+
+With no `GEMINI_API_KEY` the route is chosen by a deterministic rule-based
+walker instead, which scores the links on each page against the job. Every
+response recorded is still a real one, and the report says which navigator
+chose the path.
+
+```text
+POST /api/journeys              run one, streaming the whole trail as NDJSON
+GET  /api/journeys/:id          one saved trail
+GET  /api/journeys/catalogue    the jobs and agents the runner accepts
+```
 
 ## Rust crawler and security
 
@@ -114,15 +157,17 @@ bun run build
 
 ## Environment variables
 
-| Variable                         | Purpose                                             |
-| -------------------------------- | --------------------------------------------------- |
-| `GEMINI_API_KEY`                 | Server-only Gemini API credential                   |
-| `GEMINI_MODEL`                   | Gemini model identifier                             |
-| `GEMINI_MIN_REQUEST_INTERVAL_MS` | Minimum delay between Gemini calls for quota safety |
-| `SPECTRA_API_PORT`               | API listen port                                     |
-| `SPECTRA_WEB_ORIGINS`            | Comma-separated browser origins allowed by CORS     |
-| `SPECTRA_CRAWLER_BIN`            | Native crawler executable path                      |
-| `SPECTRA_DATA_DIR`               | Immutable local audit storage                       |
+| Variable                          | Purpose                                             |
+| --------------------------------- | --------------------------------------------------- |
+| `GEMINI_API_KEY`                  | Server-only Gemini API credential                   |
+| `GEMINI_MODEL`                    | Gemini model identifier                             |
+| `GEMINI_MIN_REQUEST_INTERVAL_MS`  | Minimum delay between Gemini calls for quota safety |
+| `SPECTRA_API_PORT`                | API listen port                                     |
+| `SPECTRA_WEB_ORIGINS`             | Comma-separated browser origins allowed by CORS     |
+| `SPECTRA_CRAWLER_BIN`             | Native crawler executable path                      |
+| `SPECTRA_DATA_DIR`                | Immutable local audit and journey storage           |
+| `SPECTRA_MAX_CONCURRENT_AUDITS`   | Audits that may stream at once before a 503         |
+| `SPECTRA_MAX_CONCURRENT_JOURNEYS` | Journeys that may stream at once before a 503       |
 
 ## Deployment
 
@@ -134,7 +179,8 @@ V1 covers secure crawling, normalized evidence, adaptive classification, canonic
 
 ## Known limitations and roadmap
 
-- JavaScript rendering is detected but not executed in V1.
+- JavaScript rendering is detected but not executed in V1. A journey reports a
+  JavaScript-only page as a blocker for exactly that reason.
 - Search grounding availability depends on the configured Gemini model and API.
 - Scoring weights are documented V0 assumptions awaiting calibration against evaluation sets.
 - Local storage is single-process; PostgreSQL is the production boundary.

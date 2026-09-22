@@ -2,7 +2,12 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { get, put } from "@vercel/blob";
-import { auditSchema, type Audit } from "@spectra/schemas";
+import {
+  auditSchema,
+  journeySchema,
+  type Audit,
+  type Journey,
+} from "@spectra/schemas";
 
 const TERMINAL = new Set(["complete", "partial", "failed"]);
 const ID = /^[a-f0-9-]{36}$/;
@@ -31,11 +36,26 @@ const dir = (() => {
 const lastBlobWrite = new Map<string, number>();
 
 export async function saveAudit(a: Audit) {
-  if (storeKind === "blob") return saveBlob(a);
+  return save("audits", a.id, a.status, a);
+}
+
+/** Journeys share the audit store; the key prefix keeps the two apart. */
+export async function saveJourney(j: Journey) {
+  return save("journeys", j.id, j.status, j);
+}
+
+async function save(
+  kind: "audits" | "journeys",
+  id: string,
+  status: string,
+  record: unknown,
+) {
+  if (storeKind === "blob") return saveBlob(kind, id, status, record);
   await mkdir(dir, { recursive: true });
-  const target = join(dir, `${a.id}.json`);
-  const temporary = join(dir, `${a.id}.${process.pid}.tmp`);
-  await writeFile(temporary, JSON.stringify(a), "utf8");
+  const name = kind === "audits" ? id : `journey-${id}`;
+  const target = join(dir, `${name}.json`);
+  const temporary = join(dir, `${name}.${process.pid}.tmp`);
+  await writeFile(temporary, JSON.stringify(record), "utf8");
   await rename(temporary, target);
 }
 
@@ -44,37 +64,57 @@ export async function saveAudit(a: Audit) {
  * Each Blob write is a billed operation, so intermediate checkpoints are
  * throttled; terminal states are always written.
  */
-async function saveBlob(a: Audit) {
+async function saveBlob(
+  kind: "audits" | "journeys",
+  id: string,
+  status: string,
+  record: unknown,
+) {
   const now = Date.now();
-  const previous = lastBlobWrite.get(a.id) ?? 0;
-  if (!TERMINAL.has(a.status) && now - previous < 15_000) return;
-  lastBlobWrite.set(a.id, now);
-  await put(`audits/${a.id}.json`, JSON.stringify(a), {
+  const terminal = TERMINAL.has(status);
+  const previous = lastBlobWrite.get(`${kind}/${id}`) ?? 0;
+  if (!terminal && now - previous < 15_000) return;
+  lastBlobWrite.set(`${kind}/${id}`, now);
+  await put(`${kind}/${id}.json`, JSON.stringify(record), {
     access: "private",
     addRandomSuffix: false,
     allowOverwrite: true,
     contentType: "application/json",
   });
-  if (TERMINAL.has(a.status)) lastBlobWrite.delete(a.id);
+  if (terminal) lastBlobWrite.delete(`${kind}/${id}`);
 }
 
 export async function getAudit(id: string) {
+  const raw = await read("audits", id);
+  return raw ? auditSchema.parse(JSON.parse(raw)) : null;
+}
+
+export async function getJourney(id: string) {
+  const raw = await read("journeys", id);
+  return raw ? journeySchema.parse(JSON.parse(raw)) : null;
+}
+
+async function read(kind: "audits" | "journeys", id: string) {
   if (!ID.test(id)) return null;
   try {
-    const raw =
-      storeKind === "blob"
-        ? await readBlob(id)
-        : await readFile(join(dir, `${id}.json`), "utf8");
-    return raw ? auditSchema.parse(JSON.parse(raw)) : null;
+    return storeKind === "blob"
+      ? await readBlob(kind, id)
+      : await readFile(
+          join(dir, `${kind === "audits" ? id : `journey-${id}`}.json`),
+          "utf8",
+        );
   } catch {
     return null;
   }
 }
 
-async function readBlob(id: string): Promise<string | null> {
+async function readBlob(
+  kind: "audits" | "journeys",
+  id: string,
+): Promise<string | null> {
   // useCache: false reads from origin, so a report opened straight after an
   // audit finishes never sees an earlier checkpoint.
-  const result = await get(`audits/${id}.json`, {
+  const result = await get(`${kind}/${id}.json`, {
     access: "private",
     useCache: false,
   });

@@ -28,8 +28,10 @@ import {
   type Mood,
   type PageState,
 } from "./avatar/Cloudee";
+import { JourneyPage } from "./Journey";
+import { Picker } from "./Picker";
+import { API, modelBadge, modelMeta, useModels, type ModelOption } from "./api";
 
-const API = import.meta.env.VITE_API_URL || "";
 const TERMINAL = new Set(["complete", "partial", "failed"]);
 
 export function App() {
@@ -69,6 +71,9 @@ export function App() {
     verdictMood,
   );
   const id = path.match(/^\/audits\/([a-f0-9-]{36})$/)?.[1];
+  // Journey is the other half of the product: one agent, one job, one site.
+  const onJourney = path === "/journey" || path.startsWith("/journeys/");
+  const journeyId = path.match(/^\/journeys\/([a-f0-9-]{36})$/)?.[1];
 
   useEffect(() => {
     const onPop = () => setPath(location.pathname);
@@ -213,6 +218,28 @@ export function App() {
           <span className="brandRule" aria-hidden="true" />
           SPECTRA
         </a>
+        <nav className="topNav" aria-label="Sections">
+          <a
+            href="/"
+            aria-current={onJourney ? undefined : "page"}
+            onClick={(event) => {
+              event.preventDefault();
+              navigate("/");
+            }}
+          >
+            Audit
+          </a>
+          <a
+            href="/journey"
+            aria-current={onJourney ? "page" : undefined}
+            onClick={(event) => {
+              event.preventDefault();
+              navigate("/journey");
+            }}
+          >
+            Journey
+          </a>
+        </nav>
         <span className="topMeta">
           <HugeiconsIcon
             icon={GoogleGeminiIcon}
@@ -226,7 +253,9 @@ export function App() {
       </header>
       <main id="main">
         <ErrorBoundary>
-          {loadingAudit ? (
+          {onJourney ? (
+            <JourneyPage id={journeyId} navigate={navigate} />
+          ) : loadingAudit ? (
             <Skeleton />
           ) : !audit ? (
             <Landing
@@ -251,32 +280,7 @@ export function App() {
   );
 }
 
-export type ModelOption = {
-  id: string;
-  label: string;
-  inputTokenLimit: number;
-  outputTokenLimit: number;
-  aiMode?: boolean;
-  recommended?: boolean;
-};
-
-/** The catalogue is read from Gemini, so new models appear without a deploy. */
-function useModels() {
-  const [models, setModels] = useState<ModelOption[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`${API}/api/models`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("no models"))))
-      .then((body: { models: ModelOption[] }) => {
-        if (!cancelled) setModels(body.models ?? []);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return models;
-}
+export type { ModelOption };
 
 const STEPS = [
   {
@@ -416,34 +420,24 @@ function Landing({
               )}
             </div>
 
-            <div className="fieldRow">
-              <label htmlFor="model">Model</label>
-              <div className="field fieldSelect">
-                <HugeiconsIcon
-                  icon={GoogleGeminiIcon}
-                  size={17}
-                  strokeWidth={1.8}
-                  aria-hidden="true"
-                />
-                <select
-                  id="model"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                >
-                  {models.length ? (
-                    models.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
-                        {m.recommended ? " (default)" : ""}
-                        {m.aiMode ? " (Google AI Mode)" : ""}
-                      </option>
-                    ))
-                  ) : (
-                    <option value={model}>{model}</option>
-                  )}
-                </select>
-              </div>
-            </div>
+            <Picker
+              label="Model"
+              hint={models.length ? `${models.length} available` : undefined}
+              value={model}
+              options={
+                models.length
+                  ? models.map((m) => ({
+                      value: m.id,
+                      label: m.label,
+                      badge: modelBadge(m),
+                      meta: modelMeta(m),
+                    }))
+                  : [{ value: model, label: model }]
+              }
+              onChange={setModel}
+              icon={GoogleGeminiIcon}
+              empty="Reading the Gemini catalogue…"
+            />
 
             <button className="runButton" disabled={running}>
               <span>{running ? "Auditing" : "Run audit"}</span>
@@ -526,6 +520,31 @@ function Landing({
             </div>
           </div>
         )}
+
+        <a
+          className="cell cellJourney reveal"
+          href="/journey"
+          style={{ "--d": "100ms" } as never}
+        >
+          <span className="kicker">
+            <span>Journey</span>
+          </span>
+          <b className="journeyPitch">Watch an agent use your site.</b>
+          <p>
+            The audit asks whether AI knows you exist. A journey asks the next
+            question: point a real agent at your domain with a job to do, and
+            watch every move it makes until it finishes or gives up.
+          </p>
+          <span className="journeyGo">
+            Run a journey
+            <HugeiconsIcon
+              icon={ArrowRight02Icon}
+              size={16}
+              strokeWidth={2}
+              aria-hidden="true"
+            />
+          </span>
+        </a>
 
         <div
           className="cell cellSteps reveal"
