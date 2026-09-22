@@ -36,12 +36,13 @@ describe("buildBoard", () => {
       "content",
       "entity",
       "agent",
+      "citability",
       "retrieval",
       "fanout",
       "answers",
       "fixes",
     ]);
-    expect(board.total).toBe(8);
+    expect(board.total).toBe(9);
     expect(board.live).toBe(false);
   });
 

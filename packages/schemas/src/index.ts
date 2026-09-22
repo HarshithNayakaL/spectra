@@ -36,6 +36,18 @@ export const pageSignalsSchema = z.object({
   socialLinks: z.array(z.string()).default([]),
   internalLinks: z.array(z.string()).default([]),
   excerpt: z.string().default(""),
+  /**
+   * False on pages scanned before the structure below was read, so the report
+   * can say "not measured" instead of scoring an old scan as empty.
+   */
+  structureRead: z.boolean().default(false),
+  /** The first real paragraph of the main content: what an engine quotes. */
+  lead: z.string().default(""),
+  /** Paragraphs of the main content, in order, for passage-level scoring. */
+  passages: z.array(z.string()).default([]),
+  /** Lists with two or more items, and tables with two or more rows. */
+  lists: z.number().int().default(0),
+  tables: z.number().int().default(0),
 });
 
 export const fileProbeSchema = z.object({

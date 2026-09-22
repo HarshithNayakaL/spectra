@@ -967,6 +967,9 @@ svg {
 .span8 {
   grid-column: span 8;
 }
+.span9 {
+  grid-column: span 9;
+}
 .span12 {
   grid-column: span 12;
 }
@@ -1816,7 +1819,8 @@ svg {
   .span5,
   .span6,
   .span7,
-  .span8 {
+  .span8,
+  .span9 {
     grid-column: span 12;
   }
   .qDetail,
@@ -3725,4 +3729,72 @@ svg {
 .fanLost {
   margin-left: 0;
   font-weight: 700;
+}
+
+/* ============================================================
+   What to write, and whether it can be quoted
+   ============================================================ */
+.briefBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+  color: var(--ink-3);
+  font-size: var(--t-data);
+}
+.briefOutline {
+  max-width: 78ch;
+  margin: 0 0 12px;
+  padding-left: 20px;
+  font-size: var(--t-small);
+  line-height: 1.7;
+}
+.briefActions {
+  margin-top: 12px;
+}
+.citeChecks {
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+}
+.citeChecks li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px 44px;
+  align-items: center;
+  gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--rule-faint);
+}
+.citeName {
+  min-width: 0;
+  font-size: var(--t-small);
+  font-weight: 600;
+}
+.citeDetail {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink-3);
+  font-size: var(--t-micro);
+  font-weight: 400;
+  line-height: 1.5;
+}
+.citeChecks li.short .citeName {
+  color: var(--ink);
+}
+.citeChecks li .mono {
+  text-align: right;
+  font-size: var(--t-data);
+  font-weight: 600;
+}
+@media (max-width: 40rem) {
+  .citeChecks li {
+    grid-template-columns: minmax(0, 1fr) 44px;
+  }
+  .citeChecks li .meter {
+    display: none;
+  }
 }

@@ -1,4 +1,5 @@
 import type { Action, Audit } from "@spectra/schemas";
+import { buildBriefs } from "./briefs";
 
 /**
  * One Markdown brief a coding agent (Claude Code, Cursor, Copilot) can act on:
@@ -60,6 +61,20 @@ export function buildFixPrompt(audit: Audit, only?: Action[]): string {
       );
     }
   });
+
+  // The content half of the work. A coding agent can create the page files and
+  // their markup; the facts stay TODOs for a person, per the rules below.
+  const briefs = only ? [] : buildBriefs(audit);
+  if (briefs.length) {
+    lines.push(
+      "## Content to write",
+      "",
+      "Each sub-query below was retrieved over the crawl and no page of this site answered it, or a rival's page answered it better. Create or extend the page named, following its outline.",
+      "",
+    );
+    for (const brief of briefs)
+      lines.push(brief.markdown.replace(/^(#+) /gm, "#$1 "), "");
+  }
 
   lines.push(
     "## Rules",

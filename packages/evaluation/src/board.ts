@@ -1,6 +1,8 @@
 import type { Audit, Check, LayerId } from "@spectra/schemas";
 import { LAYERS } from "./readiness";
 import { FANOUT_TYPE_LABEL } from "./fanout";
+import { buildCitability } from "./citability";
+import { buildBriefs } from "./briefs";
 
 /**
  * The board: one screen that says how far the measurement got, what each stage
@@ -68,6 +70,7 @@ export function buildBoard(audit: Audit): Board {
     ...(["content", "entity", "agent"] as LayerId[]).map((layer) =>
       layerStage(audit, layer, live),
     ),
+    citabilityStage(audit, live),
     retrievalStage(audit, live),
     fanoutStage(audit, live),
     answerStage(audit, live),
@@ -270,6 +273,107 @@ function layerStage(audit: Audit, layer: LayerId, live: boolean): Stage {
  * stage: "do you even have a page about this" is a different failure from
  * "the engine did not name you", and it has a different fix.
  */
+function citabilityStage(audit: Audit, live: boolean): Stage {
+  const question = "Could an engine quote a passage from your pages?";
+  const citability = buildCitability(audit);
+  if (!citability || citability.score === null)
+    return {
+      id: "citability",
+      label: "Citability",
+      question,
+      state: live ? "running" : "skipped",
+      measured: live ? "reading" : "not measured",
+      coverage: null,
+      facts: [],
+      missing:
+        live || !citability
+          ? []
+          : [
+              {
+                text: "These pages were scanned before passages were read. Re-run the audit to score them.",
+                severity: "low",
+                href: "#citability",
+              },
+            ],
+      href: "#citability",
+    };
+  const pages = citability.pages;
+  const low = pages.filter((page) => page.score! < 50);
+  const liftable = pages.reduce((total, page) => total + page.liftable, 0);
+  const paragraphs = pages.reduce((total, page) => total + page.paragraphs, 0);
+  const noLead = pages.filter(
+    (page) => page.checks.find((check) => check.id === "lead")!.earned < 20,
+  );
+  const noFacts = pages.filter(
+    (page) => page.checks.find((check) => check.id === "facts")!.earned === 0,
+  );
+  return {
+    id: "citability",
+    label: "Citability",
+    question,
+    state:
+      citability.score >= 70
+        ? "pass"
+        : citability.score >= 40
+          ? "partial"
+          : "fail",
+    measured: `${citability.score}/100 across ${pages.length} ${pages.length === 1 ? "page" : "pages"}`,
+    coverage: citability.score,
+    facts: [
+      {
+        label: "Quotable paragraphs",
+        value: `${liftable}/${paragraphs}`,
+        bad: liftable === 0,
+      },
+      {
+        label: "Pages that answer first",
+        value: `${pages.length - noLead.length}/${pages.length}`,
+        bad: noLead.length === pages.length,
+      },
+      {
+        label: "Pages below 50",
+        value: String(low.length),
+        bad: low.length > 0,
+      },
+    ],
+    missing: [
+      ...low.slice(0, 4).map((page) => ({
+        text: `${pathOf(page.url)} scores ${page.score}/100: ${page.next.charAt(0).toLowerCase()}${page.next.slice(1)}`,
+        severity: (page.score! < 25 ? "high" : "medium") as Gap["severity"],
+        href: "#citability",
+      })),
+      ...(noFacts.length
+        ? [
+            {
+              text: `${noFacts.length} of ${pages.length} pages state no number, price or date an engine could repeat.`,
+              severity: "medium" as const,
+              href: "#citability",
+            },
+          ]
+        : []),
+      ...(citability.unmeasured.length
+        ? [
+            {
+              text: `${citability.unmeasured.length} ${citability.unmeasured.length === 1 ? "page was" : "pages were"} not scored.`,
+              severity: "low" as const,
+              href: "#citability",
+            },
+          ]
+        : []),
+    ],
+    href: "#citability",
+  };
+}
+
+function pathOf(url: string) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.pathname}${parsed.search}` || "/";
+  } catch {
+    return url;
+  }
+}
+
 function retrievalStage(audit: Audit, live: boolean): Stage {
   const fanout = audit.fanout;
   const question = "Do you have a page that answers each sub-query?";
@@ -302,6 +406,7 @@ function retrievalStage(audit: Audit, live: boolean): Stage {
   for (const row of [...weak, ...absent])
     for (const term of row.retrieval!.missingTerms)
       wanted.set(term, (wanted.get(term) ?? 0) + 1);
+  const brief = buildBriefs(audit).length ? "#briefs" : "#fanout";
   const worst = [...wanted.entries()]
     // Two-letter terms still count toward coverage, but "vs" is not a word
     // anyone goes away and writes, so it stays out of the brief.
@@ -349,12 +454,12 @@ function retrievalStage(audit: Audit, live: boolean): Stage {
       ...absent.slice(0, 5).map((row) => ({
         text: `No page of yours is about "${row.query}".`,
         severity: "high" as const,
-        href: "#fanout",
+        href: brief,
       })),
       ...lost.slice(0, 5).map((row) => ({
         text: `${row.retrieval!.rival!.host} would be retrieved ahead of you for "${row.query}".`,
         severity: "high" as const,
-        href: "#fanout",
+        href: brief,
       })),
       ...(worst.length
         ? [

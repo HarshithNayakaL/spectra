@@ -29,6 +29,7 @@ import {
   type PageState,
 } from "./avatar/Cloudee";
 import { BoardSection, FanoutSection } from "./Board";
+import { BriefsSection, CitabilitySection } from "./Content";
 import { JourneyPage } from "./Journey";
 import { Picker } from "./Picker";
 import { API, modelBadge, modelMeta, useModels, type ModelOption } from "./api";
@@ -596,6 +597,12 @@ function sectionsOf(audit: Audit) {
   return [
     { id: "board", label: "Where it stands" },
     ...(audit.fanout ? [{ id: "fanout", label: "Fan-out" }] : []),
+    ...(audit.fanout?.queries.some((query) => query.retrieval)
+      ? [{ id: "briefs", label: "What to write" }]
+      : []),
+    ...(audit.scan?.pages.length
+      ? [{ id: "citability", label: "Citability" }]
+      : []),
     { id: "questions", label: "Buyer questions" },
     { id: "competitors", label: "Competitors & sources" },
     { id: "fixes", label: "Fix list" },
@@ -815,6 +822,8 @@ function Report({
 
         <BoardSection audit={audit} />
         <FanoutSection audit={audit} />
+        <BriefsSection audit={audit} />
+        <CitabilitySection audit={audit} />
         <Questions audit={audit} />
         <Competitors audit={audit} />
         <Fixes audit={audit} />

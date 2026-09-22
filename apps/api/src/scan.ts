@@ -469,6 +469,25 @@ export function readPage(response: {
     $("main").first().text() || $("article").first().text() || bodyText,
   );
   const words = bodyText ? bodyText.split(" ").length : 0;
+  // Passages come from the same scope as the excerpt: the main content when
+  // the page marks one, so navigation and footers are never scored as prose.
+  const scope = $("main").first().length
+    ? $("main").first()
+    : $("article").first().length
+      ? $("article").first()
+      : $("body");
+  const passages: string[] = [];
+  scope.find("p").each((_, element) => {
+    const text = clean($(element).text());
+    if (passages.length < 10 && text.split(" ").length >= 8)
+      passages.push(text.slice(0, 600));
+  });
+  const lists = scope
+    .find("ul,ol")
+    .filter((_, element) => $(element).children("li").length >= 2).length;
+  const tables = scope
+    .find("table")
+    .filter((_, element) => $(element).find("tr").length >= 2).length;
   const mountPoint = $(
     "#root, #app, #__next, #__nuxt, [data-reactroot], app-root",
   );
@@ -504,6 +523,11 @@ export function readPage(response: {
     // The retrieval index is built from this, so it keeps more than a preview
     // would need. Everything handed to the model is sliced again at that call.
     excerpt: mainText.slice(0, 6000),
+    structureRead: true,
+    lead: passages[0] ?? "",
+    passages,
+    lists,
+    tables,
   };
 }
 
