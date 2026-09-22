@@ -1,4 +1,13 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 
@@ -18,7 +27,15 @@ export type PickerOption = {
  * type, and on a phone it hands the choice to the operating system. This is the
  * listbox pattern instead: one button, one list, full keyboard control, and
  * nothing on screen that the page did not draw.
+ *
+ * The list is portalled to the body and placed against the button. Every card
+ * on this site is its own stacking context, so a list rendered inside one is
+ * painted under the next card whatever its z-index; outside all of them it
+ * cannot be covered or clipped.
  */
+/** The list's own tallest; below that it scrolls. */
+const LIST_MAX = 320;
+
 export function Picker({
   label,
   hint,
@@ -41,7 +58,7 @@ export function Picker({
   const id = useId();
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
-  const [above, setAbove] = useState(false);
+  const [place, setPlace] = useState<CSSProperties | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLUListElement>(null);
   const typed = useRef<{ text: string; at: number }>({ text: "", at: 0 });
@@ -55,11 +72,6 @@ export function Picker({
   // Opening always starts on the current choice, never on the first row.
   function show() {
     if (disabled || !options.length) return;
-    const rect = button.current?.getBoundingClientRect();
-    // 300px is the list's own maximum height; flip up only when it cannot fit.
-    setAbove(
-      Boolean(rect && window.innerHeight - rect.bottom < 300 && rect.top > 320),
-    );
     setActive(selected >= 0 ? selected : 0);
     setOpen(true);
   }
@@ -76,9 +88,49 @@ export function Picker({
     close();
   }
 
+  // Placed before paint, and again whenever the page under it moves, so the
+  // list stays attached to its button through a scroll or a resize.
+  useLayoutEffect(() => {
+    if (!open) return;
+    let frame = 0;
+    const measure = () => {
+      const rect = button.current?.getBoundingClientRect();
+      if (!rect) return;
+      const gap = 6;
+      const edge = 12;
+      const below = window.innerHeight - rect.bottom - gap - edge;
+      const above = rect.top - gap - edge;
+      const want = Math.min(LIST_MAX, list.current?.scrollHeight ?? LIST_MAX);
+      // Open downward unless the list fits better above.
+      const up = below < want && above > below;
+      const room = Math.max(120, up ? above : below);
+      setPlace({
+        position: "fixed",
+        left: rect.left,
+        width: rect.width,
+        maxHeight: Math.min(LIST_MAX, room),
+        ...(up
+          ? { bottom: window.innerHeight - rect.top + gap }
+          : { top: rect.bottom + gap }),
+      });
+    };
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+    measure();
+    window.addEventListener("scroll", schedule, true);
+    window.addEventListener("resize", schedule);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", schedule, true);
+      window.removeEventListener("resize", schedule);
+    };
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
-    list.current?.focus();
+    list.current?.focus({ preventScroll: true });
   }, [open]);
 
   // Keep the active row in view while the list is being walked with the keys.
@@ -96,14 +148,8 @@ export function Picker({
       if (!list.current?.contains(target) && !button.current?.contains(target))
         setOpen(false);
     };
-    // A scroll or a resize invalidates the position this list was placed at.
-    const onMove = () => setOpen(false);
     window.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("resize", onMove);
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("resize", onMove);
-    };
+    return () => window.removeEventListener("pointerdown", onPointerDown, true);
   }, [open]);
 
   function onKeyDown(event: React.KeyboardEvent) {
@@ -215,43 +261,48 @@ export function Picker({
             aria-hidden="true"
           />
         </button>
-        {open && (
-          <ul
-            className={`pickerList ${above ? "up" : ""}`}
-            role="listbox"
-            ref={list}
-            tabIndex={-1}
-            aria-labelledby={`${id}-label`}
-            aria-activedescendant={`${id}-option-${active}`}
-            onKeyDown={onKeyDown}
-          >
-            {options.map((option, index) => (
-              <li
-                key={option.value}
-                id={`${id}-option-${index}`}
-                data-index={index}
-                role="option"
-                aria-selected={option.value === value}
-                className={`pickerOption ${index === active ? "active" : ""}`}
-                onMouseEnter={() => setActive(index)}
-                onClick={() => pick(index)}
-              >
-                <span className="pickerOptionMain">
-                  <span className="pickerOptionLabel">{option.label}</span>
-                  {option.meta && (
-                    <span className="pickerOptionMeta mono">{option.meta}</span>
+        {open &&
+          createPortal(
+            <ul
+              className="pickerList"
+              style={place ?? { position: "fixed", visibility: "hidden" }}
+              role="listbox"
+              ref={list}
+              tabIndex={-1}
+              aria-labelledby={`${id}-label`}
+              aria-activedescendant={`${id}-option-${active}`}
+              onKeyDown={onKeyDown}
+            >
+              {options.map((option, index) => (
+                <li
+                  key={option.value}
+                  id={`${id}-option-${index}`}
+                  data-index={index}
+                  role="option"
+                  aria-selected={option.value === value}
+                  className={`pickerOption ${index === active ? "active" : ""}`}
+                  onMouseEnter={() => setActive(index)}
+                  onClick={() => pick(index)}
+                >
+                  <span className="pickerOptionMain">
+                    <span className="pickerOptionLabel">{option.label}</span>
+                    {option.meta && (
+                      <span className="pickerOptionMeta mono">
+                        {option.meta}
+                      </span>
+                    )}
+                  </span>
+                  {option.badge && (
+                    <span className="pickerBadge">{option.badge}</span>
                   )}
-                </span>
-                {option.badge && (
-                  <span className="pickerBadge">{option.badge}</span>
-                )}
-                <span className="pickerTick" aria-hidden="true">
-                  {option.value === value ? "✓" : ""}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
+                  <span className="pickerTick" aria-hidden="true">
+                    {option.value === value ? "✓" : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>,
+            document.body,
+          )}
       </div>
     </div>
   );
