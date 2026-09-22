@@ -85,6 +85,43 @@ describe("citability", () => {
     expect(weak.next).toMatch(/Open with one sentence/);
   });
 
+  it("fits the passage advice to why the paragraphs fail", () => {
+    const blurbs = scorePage(
+      page({
+        lead: LIFT,
+        passages: [
+          "Plan the work your team does every week.",
+          "Ship faster with fewer meetings and less process.",
+          "Track every issue from report to release today.",
+        ],
+        excerpt: "2019 2020 2021 2022 2023 2024",
+        tables: 1,
+        questionHeadings: 2,
+        hasDate: true,
+        hasAuthor: true,
+        jsonLdTypes: ["WebPage"],
+      }),
+    );
+    expect(blurbs.next).toMatch(/Expand the one-line blurbs/);
+    expect(
+      blurbs.checks.find((check) => check.id === "passages")!.detail,
+    ).toContain("3 too short");
+
+    const leaning = scorePage(
+      page({
+        lead: LIFT,
+        passages: [`It ${LIFT.slice(12)}`, `This ${LIFT.slice(12)}`],
+        excerpt: "2019 2020 2021 2022 2023 2024",
+        tables: 1,
+        questionHeadings: 2,
+        hasDate: true,
+        hasAuthor: true,
+        jsonLdTypes: ["WebPage"],
+      }),
+    );
+    expect(leaning.next).toMatch(/Start each paragraph with its subject/);
+  });
+
   it("scores a page that ships no text as zero, whatever its markup", () => {
     const shell = scorePage(
       page({ appShell: true, jsonLdTypes: ["Organization"], hasDate: true }),

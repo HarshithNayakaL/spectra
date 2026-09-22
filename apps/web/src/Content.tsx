@@ -289,8 +289,8 @@ function CitabilityRow({
           {score}/100
         </span>
         <span className="qText">
-          <span className="qKind mono">{pathOf(page.url)}</span>
-          {page.next}
+          <span className="mono">{pathOf(page.url)}</span>
+          <span className="fanCovers">{page.next}</span>
         </span>
         <span className="qSide">
           <span className="chip">

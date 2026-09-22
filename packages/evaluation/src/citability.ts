@@ -100,6 +100,16 @@ export function scorePage(page: PageSignals): PageCitability {
     !DANGLING.test(page.lead) &&
     DEFINES.test(page.lead.split(/[.!?]/)[0] ?? "");
   const facts = factsIn(page.excerpt);
+  // Why the others fail, so the advice fits the page: "break them up" is wrong
+  // for a page whose paragraphs are one-line captions.
+  const flaws = { short: 0, long: 0, dangling: 0 };
+  for (const passage of passages) {
+    if (isLiftable(passage)) continue;
+    const words = wordCount(passage);
+    if (words < MIN_LIFT) flaws.short += 1;
+    else if (words > MAX_LIFT) flaws.long += 1;
+    else flaws.dangling += 1;
+  }
   const structure = page.lists + page.tables;
 
   const checks: CitabilityCheck[] = [
@@ -122,7 +132,18 @@ export function scorePage(page: PageSignals): PageCitability {
       possible: 20,
       earned: Math.min(20, liftable.length * 5),
       detail: passages.length
-        ? `${liftable.length} of ${passages.length} paragraphs are quote-sized (${MIN_LIFT}-${MAX_LIFT} words) and stand on their own.`
+        ? `${liftable.length} of ${passages.length} paragraphs are quote-sized (${MIN_LIFT}-${MAX_LIFT} words) and stand on their own.${
+            passages.length > liftable.length
+              ? ` Of the rest, ${[
+                  flaws.short && `${flaws.short} too short`,
+                  flaws.long && `${flaws.long} too long`,
+                  flaws.dangling &&
+                    `${flaws.dangling} open on “this”, “it” or similar`,
+                ]
+                  .filter(Boolean)
+                  .join(", ")}.`
+              : ""
+          }`
         : "No paragraphs were found in the main content.",
     },
     {
@@ -199,15 +220,30 @@ export function scorePage(page: PageSignals): PageCitability {
     next: page.appShell
       ? "Render the page's text into the HTML. AI crawlers do not run JavaScript, so today there is nothing to quote."
       : worst && worst.earned < worst.possible
-        ? NEXT[worst.id]
+        ? worst.id === "passages"
+          ? passageAdvice(flaws, passages.length)
+          : NEXT[worst.id]
         : "Nothing to add: keep new pages to this shape.",
   };
 }
 
+function passageAdvice(
+  flaws: { short: number; long: number; dangling: number },
+  paragraphs: number,
+) {
+  if (!paragraphs)
+    return "Write the page's substance as paragraphs of 40-80 words, not only headings and labels.";
+  const top = Math.max(flaws.short, flaws.long, flaws.dangling);
+  if (top === flaws.short)
+    return "Expand the one-line blurbs into 40-80 word paragraphs that each make one complete claim.";
+  if (top === flaws.long)
+    return "Break long paragraphs into 40-80 word ones, one claim each.";
+  return "Start each paragraph with its subject, not “this” or “it”, so it still makes sense when quoted alone.";
+}
+
 const NEXT: Record<CitabilityCheck["id"], string> = {
   lead: "Open with one sentence that says what this is and who it is for, in under 60 words.",
-  passages:
-    "Break long paragraphs into 40-80 word ones that name their subject instead of starting with “this” or “it”.",
+  passages: "Write paragraphs of 40-80 words that each make one claim.",
   facts:
     "Replace adjectives with numbers: prices, limits, timings, counts, dates.",
   structure:

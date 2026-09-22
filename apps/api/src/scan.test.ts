@@ -34,6 +34,17 @@ describe("readPage structure", () => {
     expect(page.tables).toBe(1);
   });
 
+  it("reads copy set in bare divs, once, where the text actually sits", () => {
+    const page = read(`<html><body><main>
+      <div class="hero"><div>Acme Ledger is the invoicing tool built for freelancers and studios.</div>
+      <div><span>Send invoices, chase late payments and reconcile bank feeds nightly.</span></div></div>
+    </main></body></html>`);
+    expect(page.passages).toEqual([
+      "Acme Ledger is the invoicing tool built for freelancers and studios.",
+      "Send invoices, chase late payments and reconcile bank feeds nightly.",
+    ]);
+  });
+
   it("falls back to the body when the page marks no main content", () => {
     const page = read(
       "<html><body><p>Acme Ledger sends invoices and chases late payments for you.</p></body></html>",

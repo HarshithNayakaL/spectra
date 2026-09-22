@@ -365,6 +365,9 @@ function isHtml(response: Fetched) {
 const SOCIAL =
   /^https?:\/\/(www\.)?(linkedin\.com|twitter\.com|x\.com|facebook\.com|instagram\.com|youtube\.com|github\.com|crunchbase\.com|[a-z]{2}\.wikipedia\.org|wikidata\.org|tiktok\.com|g2\.com|trustpilot\.com)\//i;
 
+const BLOCK =
+  "p,div,li,ul,ol,dl,dd,table,tr,td,section,article,blockquote,h1,h2,h3,h4,h5,h6,header,footer,nav,aside,form,figure";
+
 /** Reads the signals an answer engine can take from raw, unrendered HTML. */
 export function readPage(response: {
   url: string;
@@ -476,12 +479,19 @@ export function readPage(response: {
     : $("article").first().length
       ? $("article").first()
       : $("body");
+  // A passage is a leaf block of text, not only a <p>: plenty of sites set
+  // their copy in bare <div>s, and an engine extracting text does not care
+  // which tag held it. A block that contains other blocks is a container, and
+  // its text is counted where it actually sits.
   const passages: string[] = [];
-  scope.find("p").each((_, element) => {
-    const text = clean($(element).text());
-    if (passages.length < 10 && text.split(" ").length >= 8)
-      passages.push(text.slice(0, 600));
-  });
+  scope
+    .find("p,div,li,dd,td,blockquote,section,article")
+    .filter((_, element) => $(element).find(BLOCK).length === 0)
+    .each((_, element) => {
+      const text = clean($(element).text());
+      if (passages.length < 10 && text.split(" ").length >= 8)
+        passages.push(text.slice(0, 600));
+    });
   const lists = scope
     .find("ul,ol")
     .filter((_, element) => $(element).children("li").length >= 2).length;
