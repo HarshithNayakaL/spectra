@@ -140,7 +140,7 @@ export function scorePage(page: PageSignals): PageCitability {
       possible: 20,
       earned: Math.min(20, liftable.length * 5),
       detail: passages.length
-        ? `${liftable.length} of ${passages.length} ${passages.length === 1 ? "paragraph is" : "paragraphs are"} quote-sized (${MIN_LIFT}-${MAX_LIFT} words) and stand on their own.${
+        ? `${liftable.length} of ${passages.length} ${passages.length === 1 ? "paragraph is" : "paragraphs are"} quote-sized (${MIN_LIFT}-${MAX_LIFT} words) and ${passages.length === 1 ? "stands on its own" : "stand on their own"}.${
             passages.length > liftable.length
               ? ` Of the rest, ${[
                   flaws.short && `${flaws.short} too short`,
