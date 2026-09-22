@@ -145,6 +145,32 @@ describe("buildBoard", () => {
     ).toBe(true);
   });
 
+  it("never calls a stage clear while it is listing gaps", () => {
+    const board = buildBoard(
+      audit({
+        visibility: {
+          score: 80,
+          engine: "gemini_model",
+          engineNote: "",
+          prompts: [],
+          measured: 5,
+          mentions: 5,
+          categoryMeasured: 5,
+          categoryMentions: 5,
+          citations: 0,
+          groundedMeasured: 0,
+          averagePosition: 2,
+          shareOfVoice: [],
+          citedDomains: [],
+        },
+      }),
+    );
+    const answers = board.stages.find((stage) => stage.id === "answers")!;
+    // Named in every question, but live search was unavailable: a gap remains.
+    expect(answers.missing.length).toBeGreaterThan(0);
+    expect(answers.state).toBe("partial");
+  });
+
   it("sorts the whole board's gaps worst first", () => {
     const board = buildBoard(
       audit({

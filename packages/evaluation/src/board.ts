@@ -72,6 +72,12 @@ export function buildBoard(audit: Audit): Board {
     answerStage(audit, live),
     fixStage(audit, live),
   ];
+  // A stage that named a gap is not clear, whatever its own checks scored.
+  // Without this a row could read "pass" beside "2 gaps", which is the kind of
+  // flattery this product exists to avoid.
+  for (const stage of stages)
+    if (stage.state === "pass" && stage.missing.length) stage.state = "partial";
+
   const rank = { high: 0, medium: 1, low: 2 } as const;
   return {
     stages,

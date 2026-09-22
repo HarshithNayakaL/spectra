@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { readableError, retryAfterMs, stripJsonFence } from "./index";
+import {
+  GeminiProvider,
+  readableError,
+  retryAfterMs,
+  stripJsonFence,
+} from "./index";
 
 const header = (value: string | null) => ({ headers: { get: () => value } });
 
@@ -54,5 +59,133 @@ describe("readable errors", () => {
 
   it("falls back to trimmed text for non-JSON bodies", () => {
     expect(readableError("  upstream\n timeout ")).toBe("upstream timeout");
+  });
+});
+
+/**
+ * The fan-out expansion is the one audit call whose response shape is new, and
+ * it cannot be exercised against the live model in CI. These drive the real
+ * request, parse and validation path with the payloads Gemini actually returns.
+ */
+describe("expandFanout", () => {
+  const profile = {
+    brand: "Acme Data",
+    aliases: [],
+    category: "B2B contact data provider",
+    description: "Acme Data sells verified B2B contact data.",
+    audience: "Sales teams",
+    market: "United States",
+    facts: [],
+  };
+
+  function reply(text: string, status = 200) {
+    return {
+      ok: status === 200,
+      status,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text }] } }],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20 },
+      }),
+      text: async () => text,
+      headers: { get: () => null },
+    } as unknown as Response;
+  }
+
+  async function run(text: string) {
+    const calls: Array<{ url: string; body: any }> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (url: any, init: any) => {
+      calls.push({ url: String(url), body: JSON.parse(init.body) });
+      return reply(text);
+    }) as typeof fetch;
+    try {
+      const provider = new GeminiProvider("k", "gemini-3.1-flash-lite");
+      const result = await provider.expandFanout({
+        profile,
+        seed: "best b2b data provider",
+        count: 4,
+      });
+      return { result, calls };
+    } finally {
+      globalThis.fetch = original;
+    }
+  }
+
+  const good = JSON.stringify({
+    queries: [
+      {
+        type: "canonicalization",
+        query: "b2b contact data provider",
+        covers: "The category's own name",
+      },
+      {
+        type: "comparison",
+        query: "zoominfo alternatives for small sales teams",
+        covers: "A buyer weighing the incumbent",
+      },
+      {
+        type: "specification",
+        query: "verified contact data for us saas startups",
+        covers: "A narrower cut by market and segment",
+      },
+      {
+        type: "follow_up",
+        query: "how accurate is purchased b2b contact data",
+        covers: "The objection that follows the shortlist",
+      },
+    ],
+  });
+
+  it("returns typed sub-queries and asks for them without grounding", async () => {
+    const { result, calls } = await run(good);
+    expect(result.value).toHaveLength(4);
+    expect(result.value[0]).toEqual({
+      type: "canonicalization",
+      query: "b2b contact data provider",
+      covers: "The category's own name",
+    });
+    // An expansion is a planning call: it must not spend search quota.
+    expect(calls[0].body.tools).toBeUndefined();
+    expect(calls[0].body.generationConfig.responseMimeType).toBe(
+      "application/json",
+    );
+    expect(calls[0].body.generationConfig.responseJsonSchema.required).toEqual([
+      "queries",
+    ]);
+    // The seed and the category both reach the model.
+    expect(calls[0].body.contents[0].parts[0].text).toContain(
+      "best b2b data provider",
+    );
+    expect(calls[0].body.contents[0].parts[0].text).toContain(
+      "B2B contact data provider",
+    );
+  });
+
+  it("accepts a fenced response, as some models still send one", async () => {
+    const { result } = await run("```json\n" + good + "\n```");
+    expect(result.value).toHaveLength(4);
+  });
+
+  it("rejects a kind that is not one of the seven", async () => {
+    await expect(
+      run(
+        JSON.stringify({
+          queries: [{ type: "vibes", query: "anything", covers: "" }],
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("rejects an empty expansion rather than reporting zero coverage", async () => {
+    await expect(run(JSON.stringify({ queries: [] }))).rejects.toThrow();
+  });
+
+  it("defaults a missing 'covers' instead of failing the whole stage", async () => {
+    const { result } = await run(
+      JSON.stringify({
+        queries: [{ type: "equivalent", query: "b2b data vendors" }],
+      }),
+    );
+    expect(result.value[0].covers).toBe("");
   });
 });
