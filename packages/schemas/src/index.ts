@@ -223,6 +223,26 @@ export const fanoutTypeSchema = z.enum([
   "comparison",
 ]);
 
+/**
+ * What our own crawler retrieves for a sub-query, over the pages it fetched.
+ * This is the retrieval step run ourselves, so it holds whether or not a live
+ * search was available.
+ */
+export const retrievalSchema = z.object({
+  status: z.enum(["answered", "weak", "missing"]),
+  /** The page of yours that would be retrieved, when one would be. */
+  url: z.string().default(""),
+  title: z.string().default(""),
+  /** BM25. Kept for the record and for ordering, never shown as a verdict. */
+  score: z.number().default(0),
+  /** Share of the sub-query's meaningful terms that page carries, 0-1. */
+  coverage: z.number().min(0).max(1).default(0),
+  matched: z.array(z.string()).default([]),
+  /** The words your best page does not have. The thing to go and write. */
+  missingTerms: z.array(z.string()).default([]),
+  snippet: z.string().default(""),
+});
+
 export const fanoutQuerySchema = z.object({
   id: z.string(),
   type: fanoutTypeSchema,
@@ -240,6 +260,8 @@ export const fanoutQuerySchema = z.object({
   sources: z.array(sourceSchema).default([]),
   /** What the search tool typed for this sub-query. */
   issuedQueries: z.array(z.string()).default([]),
+  /** Our own retrieval over the crawl. Null only on an audit that predates it. */
+  retrieval: retrievalSchema.nullable().default(null),
   error: z.string().default(""),
   durationMs: z.number().default(0),
 });
@@ -267,6 +289,16 @@ export const fanoutSchema = z.object({
       }),
     )
     .default([]),
+  /** The same breakdown for our own retrieval, which always runs. */
+  byTypeAnswerable: z
+    .array(
+      z.object({
+        type: fanoutTypeSchema,
+        measured: z.number().int(),
+        hits: z.number().int(),
+      }),
+    )
+    .default([]),
   /** Who answered instead, by domain. */
   answeredBy: z
     .array(
@@ -279,8 +311,17 @@ export const fanoutSchema = z.object({
     .default([]),
   /** Every query the search tool typed across the whole audit, de-duplicated. */
   issued: z.array(z.string()).default([]),
+  /** Pages our crawler indexed to answer the retrieval step itself. */
+  indexedPages: z.number().int().default(0),
+  /** Sub-queries a page of yours could actually be retrieved for. */
+  answerable: z.number().int().default(0),
+  /** Sub-queries where a page exists but is too thin to win, 0 when none. */
+  weak: z.number().int().default(0),
+  /** Share of sub-queries your own site can answer at all, 0-100. */
+  answerableCoverage: z.number().min(0).max(100).nullable().default(null),
 });
 
+export type Retrieval = z.infer<typeof retrievalSchema>;
 export type FanoutType = z.infer<typeof fanoutTypeSchema>;
 export type FanoutQuery = z.infer<typeof fanoutQuerySchema>;
 export type Fanout = z.infer<typeof fanoutSchema>;

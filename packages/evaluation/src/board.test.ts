@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Audit } from "@spectra/schemas";
+import type { Audit, FanoutQuery } from "@spectra/schemas";
 import { buildBoard } from "./board";
 
 function audit(overrides: Partial<Audit> = {}): Audit {
@@ -36,11 +36,12 @@ describe("buildBoard", () => {
       "content",
       "entity",
       "agent",
+      "retrieval",
       "fanout",
       "answers",
       "fixes",
     ]);
-    expect(board.total).toBe(7);
+    expect(board.total).toBe(8);
     expect(board.live).toBe(false);
   });
 
@@ -111,6 +112,75 @@ describe("buildBoard", () => {
     ).toBe("0/1");
   });
 
+  it("names the pages you do not have, and the words to write", () => {
+    const query = (over: {
+      query?: string;
+      status?: "answered" | "weak" | "missing";
+      missingTerms?: string[];
+    }): FanoutQuery => ({
+      id: "f1",
+      type: "comparison" as const,
+      covers: "",
+      status: "skipped" as const,
+      answer: "",
+      mentioned: false,
+      position: null,
+      cited: false,
+      competitors: [],
+      sources: [],
+      issuedQueries: [],
+      error: "",
+      durationMs: 0,
+      query: over.query ?? "zoominfo alternatives",
+      retrieval: {
+        status: over.status ?? "missing",
+        url: "",
+        title: "",
+        score: 0,
+        coverage: 0,
+        matched: [],
+        missingTerms: over.missingTerms ?? ["alternatives", "migration"],
+        snippet: "",
+      },
+    });
+    const board = buildBoard(
+      audit({
+        fanout: {
+          seed: "best b2b data",
+          engine: "gemini_model",
+          engineNote: "",
+          queries: [
+            query({ query: "zoominfo alternatives" }),
+            query({ query: "apollo vs acme", missingTerms: ["migration"] }),
+            query({ status: "answered", missingTerms: [] }),
+          ],
+          measured: 0,
+          mentions: 0,
+          cited: 0,
+          coverage: null,
+          byType: [],
+          byTypeAnswerable: [],
+          answeredBy: [],
+          issued: [],
+          indexedPages: 12,
+          answerable: 1,
+          weak: 0,
+          answerableCoverage: 33,
+        },
+      }),
+    );
+    const retrieval = board.stages.find((stage) => stage.id === "retrieval")!;
+    expect(retrieval.state).toBe("fail");
+    expect(retrieval.coverage).toBe(33);
+    expect(retrieval.missing[0].text).toContain(
+      'about "zoominfo alternatives"',
+    );
+    // "migration" is wanted by two sub-queries, so it leads the brief.
+    expect(retrieval.missing.at(-1)!.text).toContain("migration (2)");
+    // "vs" would be noise in a brief of words to go and write.
+    expect(retrieval.missing.at(-1)!.text).not.toContain("vs (");
+  });
+
   it("turns a fan-out with a lost kind into a gap that names the kind", () => {
     const board = buildBoard(
       audit({
@@ -127,8 +197,13 @@ describe("buildBoard", () => {
             { type: "comparison", measured: 2, hits: 0 },
             { type: "equivalent", measured: 4, hits: 2 },
           ],
+          byTypeAnswerable: [],
           answeredBy: [{ domain: "g2.com", count: 5, own: false }],
           issued: [],
+          indexedPages: 12,
+          answerable: 2,
+          weak: 1,
+          answerableCoverage: 33,
         },
       }),
     );

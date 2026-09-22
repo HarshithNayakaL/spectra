@@ -31,6 +31,14 @@ is bounded by the same wall clock as the rest of the audit: its width is
 declines to run and records why rather than publishing a coverage number built
 from one answer.
 
+Retrieval is the half of that stage we own. `buildIndex` turns the crawled
+pages into a BM25 index — title weighted three times, headings and description
+twice — and `retrieve` returns the page that would be retrieved, its term
+coverage, and the terms it lacks. There is no model in it, so it is a pure
+function of the crawl: the same pages and the same sub-query always produce the
+same verdict, and it runs whether or not a live search is available. The index
+is built per audit and never stored; only what it retrieved is.
+
 `buildBoard` is pure and derived. It reads an `Audit` and returns the per-stage
 state, coverage and gaps; nothing about it is persisted, so the schema does not
 version with it and an audit written before the board existed still renders one.

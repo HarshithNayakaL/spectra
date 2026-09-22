@@ -3564,3 +3564,141 @@ svg {
     animation: none;
   }
 }
+
+/* ============================================================
+   The display voice
+   Doto carries every display-scale element, and only those. One
+   variation setting for all of them, declared once, so the dot
+   matrix never drifts between sections. Data stays in Geist Mono
+   and body copy stays in Geist, because a dot-matrix face is a
+   headline instrument and a paragraph read at 4.5:1 is not.
+   ============================================================ */
+:root {
+  --rond: 24;
+}
+.heroType,
+.statNum,
+.cellCaption h2,
+.cardHead h1,
+.scoreBig,
+.scoreMid,
+.blockHead h2,
+.stepsTitle,
+.jVerdictWord,
+.jBig,
+.card h3,
+.layerCardHead h3,
+.boardLabel,
+.empty b {
+  font-family: var(--display);
+  font-variation-settings: "ROND" var(--rond);
+}
+/* Doto sets narrower than Geist at the same size, so the smaller display
+   elements get a size bump and a touch of tracking to stay legible. */
+.card h3,
+.layerCardHead h3 {
+  font-size: 1.3125rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+}
+.boardLabel {
+  font-size: 1.0625rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.empty b {
+  font-size: var(--t-h3);
+  font-weight: 700;
+}
+.scoreBig.muted {
+  color: var(--ink-3);
+}
+
+/* ============================================================
+   Retrieval — the crawler used as the search engine
+   ============================================================ */
+.fanRetrieval {
+  margin-left: 0;
+  font-weight: 600;
+}
+.fanRetrieval.answered {
+  color: oklch(0.42 0.12 150);
+  background: oklch(0.95 0.04 150);
+}
+.fanRetrieval.weak {
+  color: var(--ink-2);
+  background: var(--field);
+}
+.fanRetrieval.missing {
+  color: var(--signal);
+  background: var(--signal-field);
+}
+.fanRet {
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  border-left: 2px solid var(--rule);
+  background: var(--field);
+}
+.fanRet.missing {
+  border-left-color: var(--signal);
+  background: var(--signal-field);
+}
+.fanRet.answered {
+  border-left-color: oklch(0.52 0.12 150);
+}
+.fanRet > b {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--ink-3);
+  font-size: var(--t-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.fanRet.missing > b {
+  color: var(--signal);
+}
+.fanRetPage {
+  margin: 0 0 8px;
+  font-size: var(--t-small);
+}
+.fanRetPage .mono {
+  color: var(--ink-3);
+  font-size: var(--t-data);
+}
+.fanRetTerms {
+  margin: 0;
+  font-size: var(--t-small);
+  line-height: 1.9;
+}
+.fanRetTerms b {
+  color: var(--ink-2);
+}
+.fanRetTerms code {
+  margin-right: 6px;
+  padding: 2px 7px;
+  border: 1px solid var(--rule);
+  border-radius: 7px;
+  background: var(--paper);
+  font: 500 var(--t-data) / 1 var(--mono);
+}
+.fanRetSnippet {
+  max-width: 78ch;
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--rule);
+  background: var(--paper);
+  color: var(--ink-2);
+  font-size: var(--t-small);
+  line-height: 1.6;
+}
+
+/* A number that was never measured is not a number. The card keeps its shape
+   and says so in words, rather than setting a dash at display size. */
+.scoreNone {
+  display: block;
+  margin: 16px 0 10px;
+  color: oklch(1 0 0 / 0.55);
+  font-size: var(--t-small);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}

@@ -501,7 +501,9 @@ export function readPage(response: {
     hasAuthor,
     socialLinks: [...socialLinks].slice(0, 12),
     internalLinks: [...internalLinks].slice(0, 250),
-    excerpt: mainText.slice(0, 2500),
+    // The retrieval index is built from this, so it keeps more than a preview
+    // would need. Everything handed to the model is sliced again at that call.
+    excerpt: mainText.slice(0, 6000),
   };
 }
 

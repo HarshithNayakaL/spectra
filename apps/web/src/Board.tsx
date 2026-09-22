@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { Audit, Fanout, FanoutQuery } from "@spectra/schemas";
+import type { Audit, FanoutQuery, Retrieval } from "@spectra/schemas";
 import {
   FANOUT_TYPE_LABEL,
   FANOUT_TYPE_WHY,
@@ -165,6 +165,60 @@ function GapRow({ gap }: { gap: Gap }) {
   );
 }
 
+const RETRIEVAL_WORD: Record<Retrieval["status"], string> = {
+  answered: "You can answer",
+  weak: "Thin on this",
+  missing: "No page",
+};
+
+/**
+ * What our own crawler retrieved for one sub-query. This is the half that
+ * always runs, and the half an operator can act on before lunch: the page that
+ * would be retrieved, how much of the sub-query it carries, and the exact
+ * words it does not have.
+ */
+function RetrievalDetail({ retrieval }: { retrieval: Retrieval }) {
+  return (
+    <div className={`fanRet ${retrieval.status}`}>
+      <b className="mono">
+        {retrieval.status === "missing"
+          ? "Nothing of yours is about this"
+          : retrieval.status === "weak"
+            ? "Your closest page is thin on this"
+            : "Your page for this"}
+      </b>
+      {retrieval.url ? (
+        <p className="fanRetPage">
+          {retrieval.status === "missing" ? "Closest was " : ""}
+          <a href={retrieval.url} target="_blank" rel="noreferrer noopener">
+            {pathOf(retrieval.url)}
+          </a>
+          <span className="mono">
+            {" "}
+            carries {retrieval.matched.length} of{" "}
+            {retrieval.matched.length + retrieval.missingTerms.length} terms
+          </span>
+        </p>
+      ) : (
+        <p className="fanRetPage">
+          Nothing we crawled matches this sub-query at all.
+        </p>
+      )}
+      {retrieval.missingTerms.length > 0 && (
+        <p className="fanRetTerms">
+          <b>Missing from it: </b>
+          {retrieval.missingTerms.map((term) => (
+            <code key={term}>{term}</code>
+          ))}
+        </p>
+      )}
+      {retrieval.snippet && (
+        <blockquote className="fanRetSnippet">{retrieval.snippet}</blockquote>
+      )}
+    </div>
+  );
+}
+
 /* ============================================================ fan-out */
 
 export function FanoutSection({ audit }: { audit: Audit }) {
@@ -187,7 +241,7 @@ export function FanoutSection({ audit }: { audit: Audit }) {
         </p>
       </div>
 
-      {!fanout.measured ? (
+      {!fanout.queries.length ? (
         <div className="card empty">
           <b>The fan-out was not measured on this run</b>
           <p>{fanout.engineNote}</p>
@@ -195,27 +249,69 @@ export function FanoutSection({ audit }: { audit: Audit }) {
       ) : (
         <>
           <div className="grid">
-            <section className="card span5 dark">
-              <span className="scoreLabel">Fan-out coverage</span>
-              <span className="scoreBig">{fanout.coverage}</span>
+            <section className="card span3 dark">
+              <span className="scoreLabel">Answerable</span>
+              {fanout.answerableCoverage === null ? (
+                <span className="scoreNone mono">Not measured</span>
+              ) : (
+                <span className="scoreBig">{fanout.answerableCoverage}</span>
+              )}
               <p className="scoreSub">
-                Reached on <b>{reached}</b> of <b>{fanout.measured}</b>{" "}
-                sub-queries: named in <b>{fanout.mentions}</b>, used as a source
-                in <b>{fanout.cited}</b>.
+                <b>{fanout.answerable}</b> of <b>{fanout.queries.length}</b>{" "}
+                sub-queries have a page of yours that could be retrieved for
+                them
+                {fanout.weak ? (
+                  <>
+                    , and <b>{fanout.weak}</b>{" "}
+                    {fanout.weak === 1 ? "has" : "have"} one that is close but
+                    thin
+                  </>
+                ) : null}
+                .
+              </p>
+              <p className="scoreSub">
+                Retrieved by SPECTRA over the <b>{fanout.indexedPages}</b> pages
+                we crawled — no live search needed.
+              </p>
+            </section>
+
+            <section className="card span3 dark">
+              <span className="scoreLabel">Reached in the answer</span>
+              {fanout.coverage === null ? (
+                <span className="scoreNone mono">Not measured</span>
+              ) : (
+                <span className="scoreBig">{fanout.coverage}</span>
+              )}
+              <p className="scoreSub">
+                {fanout.measured ? (
+                  <>
+                    Reached on <b>{reached}</b> of <b>{fanout.measured}</b>{" "}
+                    sub-queries: named in <b>{fanout.mentions}</b>, used as a
+                    source in <b>{fanout.cited}</b>.
+                  </>
+                ) : (
+                  "Not measured: these sub-queries were not put to a live search on this run."
+                )}
               </p>
               <p className="scoreSub">
                 Expanded from: <i>{fanout.seed}</i>
               </p>
             </section>
 
-            <section className="card span7">
+            <section className="card span6">
               <h3>Where the losses are</h3>
               <p className="muted small">
                 Each kind of sub-query is a different slice of the same intent.
                 A kind you never appear in is a kind of buyer you never reach.
+                {fanout.byType.length
+                  ? ""
+                  : " Measured here by whether one of your pages could be retrieved at all."}
               </p>
               <ul className="fanTypes">
-                {fanout.byType.map((row) => (
+                {(fanout.byType.length
+                  ? fanout.byType
+                  : fanout.byTypeAnswerable
+                ).map((row) => (
                   <li key={row.type} className={row.hits ? "" : "lost"}>
                     <span className="fanTypeName">
                       {FANOUT_TYPE_LABEL[row.type]}
@@ -307,24 +403,35 @@ function FanoutRow({
   open: boolean;
   toggle: () => void;
 }) {
+  const retrieval = query.retrieval;
+  // The live answer is the better verdict when there is one. Without it the
+  // row still has something true to say, because our own retrieval always ran.
   const verdict =
-    query.status !== "ok"
-      ? query.status === "skipped"
-        ? "Not run"
-        : "Failed"
-      : query.mentioned
+    query.status === "ok"
+      ? query.mentioned
         ? query.position
           ? `Named #${query.position}`
           : "Named"
         : query.cited
           ? "Cited"
-          : "Absent";
+          : "Absent"
+      : query.status === "error"
+        ? "Failed"
+        : retrieval
+          ? RETRIEVAL_WORD[retrieval.status]
+          : "Not run";
   const tone =
-    query.status !== "ok"
-      ? "neutral"
-      : query.mentioned || query.cited
+    query.status === "ok"
+      ? query.mentioned || query.cited
         ? "good"
-        : "bad";
+        : "bad"
+      : query.status === "error" || !retrieval
+        ? "neutral"
+        : retrieval.status === "answered"
+          ? "good"
+          : retrieval.status === "weak"
+            ? "neutral"
+            : "bad";
   return (
     <article className={`qRow fanRow ${open ? "open" : ""}`}>
       <button
@@ -332,7 +439,7 @@ function FanoutRow({
         className="qMain"
         onClick={toggle}
         aria-expanded={open}
-        disabled={query.status !== "ok" && !query.error}
+        disabled={query.status !== "ok" && !query.error && !retrieval}
       >
         <span className={`verdict ${tone}`}>{verdict}</span>
         <span className="qText">
@@ -342,6 +449,13 @@ function FanoutRow({
         </span>
         <span className="qSide">
           {query.cited && <span className="chip good">Cited you</span>}
+          {retrieval && (query.status === "ok" || retrieval.url) && (
+            <span className={`chip fanRetrieval ${retrieval.status}`}>
+              {retrieval.url
+                ? `${Math.round(retrieval.coverage * 100)}% on ${pathOf(retrieval.url)}`
+                : "No page"}
+            </span>
+          )}
           {query.competitors.length > 0 && (
             <span className="qRivals">
               {query.competitors.slice(0, 3).join(", ")}
@@ -354,6 +468,7 @@ function FanoutRow({
       </button>
       {open && (
         <div className="qDetail">
+          {retrieval && <RetrievalDetail retrieval={retrieval} />}
           {query.error && <p className="errorText">{query.error}</p>}
           {query.answer && <p className="fanAnswer">{query.answer}</p>}
           {query.issuedQueries.length > 0 && (

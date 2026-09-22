@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   buildActions,
+  buildIndex,
   buildLlmsTxt,
   citedOwnDomain,
   deriveIdentity,
@@ -13,6 +14,7 @@ import {
   mentions,
   normaliseSources,
   recognises,
+  retrieve,
   summariseFanout,
   summariseVisibility,
   type BrandMatcher,
@@ -133,6 +135,16 @@ export async function runAudit(
     audit.warnings.push(
       "GEMINI_API_KEY is not configured, so AI visibility was not measured. Readiness checks are complete.",
     );
+    // Expanding a question needs a model, but retrieving does not. When the
+    // operator typed their own questions there is still something true to
+    // measure: whether any page we crawled could be retrieved for them.
+    if (customPrompts.length)
+      audit.fanout = retrievalOnlyFanout(
+        scan,
+        customPrompts,
+        audit.host,
+        "No model is configured, so these questions were not expanded or put to an answer engine. They were run through SPECTRA's own retrieval over the pages we crawled, which needs no model at all.",
+      );
     return finish(audit, started, "partial");
   }
 
@@ -307,40 +319,41 @@ export async function runAudit(
     categoryPrompts[0] ??
     queue[0]?.text ??
     "";
+  // The crawler is the search engine for half of this. The index is built from
+  // the pages it already fetched, so the retrieval step runs on every
+  // sub-query whether or not a live search is available, and a dead grounding
+  // quota costs the live answers rather than the whole stage. The index is
+  // never stored; only what it retrieved is.
+  const corpus = buildIndex(
+    scan.pages.map((page) => ({
+      url: page.url,
+      title: page.title,
+      description: page.description,
+      headings: page.headings.map((heading) => heading.text),
+      text: page.excerpt,
+    })),
+  );
+
   if (!seed) {
     // Nothing to expand: no question survived.
-  } else if (engine !== "gemini_search") {
-    audit.fanout = summariseFanout({
-      seed,
-      queries: [],
-      matcher,
-      engine,
-      engineNote:
-        "The fan-out was not run: it measures which sub-queries a live search reaches you on, and live search was unavailable on this run.",
-      issued,
-    });
   } else {
-    // Each grounded sub-query costs a request plus its pacing interval, so the
-    // width of the fan-out is whatever the remaining budget actually affords.
+    // A grounded sub-query costs a request and its pacing interval, so the
+    // live half is whatever the remaining budget affords. Retrieval costs
+    // nothing, so the width does not shrink with the clock.
     const room = Math.floor((timeLeft() - 45_000) / 9_000);
-    const width = Math.max(0, Math.min(7, room));
-    if (width < 3) {
-      audit.fanout = summariseFanout({
-        seed,
-        queries: [],
-        matcher,
-        engine,
-        engineNote: `The fan-out was not run: only ${Math.max(0, Math.round(timeLeft() / 1000))}s of the time budget was left, and a fan-out narrower than three sub-queries measures nothing.`,
-        issued,
-      });
-    } else {
+    const live = engine === "gemini_search" && room >= 3;
+    const width = 7;
+    {
       await step(
         "expanding",
         `Expanding "${seed}" the way an answer engine does`,
       );
       const rows: FanoutQuery[] = [];
-      let note =
-        "Each sub-query below was sent to Gemini with Google Search on, exactly as written. They are synthetic: no reader typed them, the engine invents them.";
+      let note = live
+        ? "Each sub-query below was sent to Gemini with Google Search on, exactly as written, and run through SPECTRA's own retrieval over the pages we crawled. They are synthetic: no reader typed them, the engine invents them."
+        : engine === "gemini_search"
+          ? "There was not enough of the time budget left to put these sub-queries to a live search, so they were measured by SPECTRA's own retrieval over the pages we crawled."
+          : "Live search was unavailable, so these sub-queries were not put to an answer engine. They were still run through SPECTRA's own retrieval over the pages we crawled, which is what answerability measures.";
       const publishFanout = () => {
         audit.fanout = summariseFanout({
           seed,
@@ -349,21 +362,25 @@ export async function runAudit(
           engine,
           engineNote: note,
           issued: [...issued, ...rows.flatMap((row) => row.issuedQueries)],
+          indexedPages: corpus.pages,
         });
       };
       try {
         const plan = (
           await provider.expandFanout({ profile: plain, seed, count: width })
         ).value.slice(0, width);
-        for (const [index, item] of plan.entries()) {
-          const id = `f${index + 1}`;
-          if (timeLeft() < 22_000) {
-            rows.push(blankFanout(id, item));
+        for (const [position, item] of plan.entries()) {
+          const id = `f${position + 1}`;
+          // Retrieval first: it always runs, and never costs a request.
+          const retrieval = retrieve(corpus, item.query);
+          if (!live || timeLeft() < 22_000) {
+            rows.push({ ...blankFanout(id, item), retrieval });
+            publishFanout();
             continue;
           }
           await step(
             "expanding",
-            `Sub-query ${index + 1} of ${plan.length}: "${item.query}"`,
+            `Sub-query ${position + 1} of ${plan.length}: "${item.query}"`,
           );
           const began = Date.now();
           try {
@@ -382,6 +399,7 @@ export async function runAudit(
               competitors: [],
               sources,
               issuedQueries: answer.queries.slice(0, 8),
+              retrieval,
               error: "",
               durationMs: Date.now() - began,
             });
@@ -392,13 +410,17 @@ export async function runAudit(
             rows.push({
               ...blankFanout(id, item),
               status: "error",
+              retrieval,
               error: messageOf(error),
               durationMs: Date.now() - began,
             });
             if (permanent) {
-              note = `The fan-out stopped early: ${messageOf(error)}.`;
-              for (const [rest, next] of plan.slice(index + 1).entries())
-                rows.push(blankFanout(`f${index + 2 + rest}`, next));
+              note = `Live answers stopped early (${messageOf(error)}); the rest of the fan-out was measured by SPECTRA's own retrieval alone.`;
+              for (const [rest, next] of plan.slice(position + 1).entries())
+                rows.push({
+                  ...blankFanout(`f${position + 2 + rest}`, next),
+                  retrieval: retrieve(corpus, next.query),
+                });
               break;
             }
           }
@@ -498,6 +520,45 @@ function skipped(
   };
 }
 
+/**
+ * The fan-out with the model taken out of it: the operator's own questions,
+ * retrieved over the crawl. Nothing here is expanded or answered, so the rows
+ * carry only what our own index can prove.
+ */
+function retrievalOnlyFanout(
+  scan: NonNullable<Audit["scan"]>,
+  prompts: string[],
+  host: string,
+  note: string,
+) {
+  const corpus = buildIndex(
+    scan.pages.map((page) => ({
+      url: page.url,
+      title: page.title,
+      description: page.description,
+      headings: page.headings.map((heading) => heading.text),
+      text: page.excerpt,
+    })),
+  );
+  const queries = prompts.slice(0, 7).map((text, position) => ({
+    ...blankFanout(`f${position + 1}`, {
+      type: "equivalent" as const,
+      query: text,
+      covers: "Your own question, as you typed it",
+    }),
+    retrieval: retrieve(corpus, text),
+  }));
+  return summariseFanout({
+    seed: prompts[0],
+    queries,
+    matcher: { brand: host, aliases: [], host },
+    engine: "gemini_search",
+    engineNote: note,
+    issued: [],
+    indexedPages: corpus.pages,
+  });
+}
+
 function blankFanout(
   id: string,
   item: { type: FanoutQuery["type"]; query: string; covers: string },
@@ -515,6 +576,7 @@ function blankFanout(
     competitors: [],
     sources: [],
     issuedQueries: [],
+    retrieval: null,
     error: "",
     durationMs: 0,
   };

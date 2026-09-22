@@ -57,7 +57,7 @@ The API creates immutable audit snapshots and exposes them at `/api/audits/:id`,
 6. Ask the configured model provider for schema-constrained classification and semantic observations.
 7. Select supported evaluation dimensions for the site archetype.
 8. Generate retrieval questions from evidence-backed claims; run direct evaluation and optional Google Search grounding.
-9. Expand the headline question into typed fan-out sub-queries and run each one.
+9. Expand the headline question into typed fan-out sub-queries, retrieve each one over the crawl, and put them to a live search when one is available.
 10. Calculate `spectra-v0.1` metrics from registered checks and visible denominators.
 11. Diagnose positioning bugs and produce evidence-linked repairs.
 
@@ -94,6 +94,35 @@ vocabulary.
 Every prompt also records `issuedQueries`: the queries Gemini's search tool
 literally typed while answering. Nobody typed those; the engine invented them on
 your behalf, and the report shows them verbatim.
+
+## Retrieval: the crawler used as the search engine
+
+A fan-out is two steps. The engine expands the question, then it **retrieves**
+for each sub-query and writes an answer from what came back. Measuring only the
+finished answer skips the step that decided it — and it makes the whole
+measurement hostage to somebody else's search quota.
+
+So SPECTRA runs the retrieval step itself. The pages our crawler already
+fetched become a BM25 index, and every sub-query is retrieved against it. No
+model is in this loop, so the same crawl and the same sub-query always give the
+same answer, and it keeps working when a live search does not.
+
+Per sub-query it reports the one thing an operator can act on today:
+
+| Verdict    | Meaning                                                                                                         |
+| ---------- | --------------------------------------------------------------------------------------------------------------- |
+| `answered` | A page of yours carries 75% or more of the sub-query's terms. It could be the page that gets retrieved.         |
+| `weak`     | Your closest page carries 40–75%. It is about something adjacent, and the report names the words it is missing. |
+| `missing`  | Nothing you published is about this. There is no page to retrieve.                                              |
+
+The verdict is term coverage rather than the raw BM25 score, because "your best
+page is /enterprise and it is missing _adyen_" is a thing you can go and write,
+and "score 1.27" is not. The board rolls the misses up into one brief: the
+words no page of yours carries, most-wanted first.
+
+This runs with no API key at all. Point SPECTRA at a site with your own
+questions and it will tell you which of them your content could answer, without
+calling anything.
 
 ## The board: how far it got, and what is missing
 

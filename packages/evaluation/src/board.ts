@@ -68,6 +68,7 @@ export function buildBoard(audit: Audit): Board {
     ...(["content", "entity", "agent"] as LayerId[]).map((layer) =>
       layerStage(audit, layer, live),
     ),
+    retrievalStage(audit, live),
     fanoutStage(audit, live),
     answerStage(audit, live),
     fixStage(audit, live),
@@ -261,6 +262,96 @@ function layerStage(audit: Audit, layer: LayerId, live: boolean): Stage {
     facts,
     missing: gapsFrom(checks, `#layer-${layer}`),
     href: `#layer-${layer}`,
+  };
+}
+
+/**
+ * Retrieval is the half of the fan-out our own crawler runs, so it is its own
+ * stage: "do you even have a page about this" is a different failure from
+ * "the engine did not name you", and it has a different fix.
+ */
+function retrievalStage(audit: Audit, live: boolean): Stage {
+  const fanout = audit.fanout;
+  const question = "Do you have a page that answers each sub-query?";
+  const rows = (fanout?.queries ?? []).filter((query) => query.retrieval);
+  if (!rows.length)
+    return {
+      id: "retrieval",
+      label: "Retrieval",
+      question,
+      state: live ? "running" : "skipped",
+      measured: live ? "indexing" : "not measured",
+      coverage: null,
+      facts: [],
+      missing: live
+        ? []
+        : [
+            {
+              text: "No sub-queries were retrieved over the crawl, so it is not known which of them your own pages could answer.",
+              severity: "medium",
+            },
+          ],
+      href: "#fanout",
+    };
+  const answered = rows.filter((row) => row.retrieval!.status === "answered");
+  const weak = rows.filter((row) => row.retrieval!.status === "weak");
+  const absent = rows.filter((row) => row.retrieval!.status === "missing");
+  // The words no page of yours carries, most-wanted first. This is the brief.
+  const wanted = new Map<string, number>();
+  for (const row of [...weak, ...absent])
+    for (const term of row.retrieval!.missingTerms)
+      wanted.set(term, (wanted.get(term) ?? 0) + 1);
+  const worst = [...wanted.entries()]
+    // Two-letter terms still count toward coverage, but "vs" is not a word
+    // anyone goes away and writes, so it stays out of the brief.
+    .filter(([term]) => term.length > 2)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 8);
+
+  return {
+    id: "retrieval",
+    label: "Retrieval",
+    question,
+    state: absent.length ? "fail" : weak.length ? "partial" : "pass",
+    measured: `${answered.length}/${rows.length} sub-queries answerable`,
+    coverage: Math.round((answered.length / rows.length) * 100),
+    facts: [
+      { label: "Pages indexed", value: String(fanout?.indexedPages ?? 0) },
+      {
+        label: "A page answers it",
+        value: `${answered.length}/${rows.length}`,
+        bad: answered.length === 0,
+      },
+      {
+        label: "A page is close but thin",
+        value: String(weak.length),
+        bad: weak.length > 0,
+      },
+      {
+        label: "No page on the subject",
+        value: String(absent.length),
+        bad: absent.length > 0,
+      },
+    ],
+    missing: [
+      ...absent.slice(0, 5).map((row) => ({
+        text: `No page of yours is about "${row.query}".`,
+        severity: "high" as const,
+        href: "#fanout",
+      })),
+      ...(worst.length
+        ? [
+            {
+              text: `Words no page of yours carries, most-wanted first: ${worst
+                .map(([term, count]) => `${term} (${count})`)
+                .join(", ")}.`,
+              severity: "medium" as const,
+              href: "#fanout",
+            },
+          ]
+        : []),
+    ],
+    href: "#fanout",
   };
 }
 

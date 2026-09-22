@@ -75,10 +75,15 @@ export function summariseFanout(input: {
   engine: Engine;
   engineNote: string;
   issued: string[];
+  /** Pages our crawler indexed to run the retrieval step itself. */
+  indexedPages: number;
 }): Fanout {
   const { queries, matcher } = input;
   const ok = queries.filter((query) => query.status === "ok");
   const reached = ok.filter((query) => query.mentioned || query.cited);
+  const retrieved = queries.flatMap((query) =>
+    query.retrieval ? [query.retrieval] : [],
+  );
   const counts = new Map<string, { count: number; own: boolean }>();
   for (const query of ok)
     for (const domain of new Set(
@@ -112,6 +117,20 @@ export function summariseFanout(input: {
         },
       ];
     }),
+    byTypeAnswerable: FANOUT_TYPES.flatMap((type) => {
+      const rows = queries.filter(
+        (query) => query.type === type && query.retrieval,
+      );
+      if (!rows.length) return [];
+      return [
+        {
+          type,
+          measured: rows.length,
+          hits: rows.filter((query) => query.retrieval!.status === "answered")
+            .length,
+        },
+      ];
+    }),
     answeredBy: [...counts.entries()]
       .map(([domain, row]) => ({ domain, ...row }))
       .sort((a, b) => b.count - a.count || a.domain.localeCompare(b.domain))
@@ -119,6 +138,19 @@ export function summariseFanout(input: {
     // De-duplicated, case-insensitively: the same expansion recurs across
     // sub-queries and the list is meant to be read, not counted twice.
     issued: dedupe(tidy(input.issued)),
+    // Answerability is measured over every sub-query, answered or not: our own
+    // retrieval runs whether or not a live search was available, so this half
+    // of the fan-out survives a dead grounding quota.
+    indexedPages: input.indexedPages,
+    answerable: retrieved.filter((row) => row.status === "answered").length,
+    weak: retrieved.filter((row) => row.status === "weak").length,
+    answerableCoverage: retrieved.length
+      ? Math.round(
+          (retrieved.filter((row) => row.status === "answered").length /
+            retrieved.length) *
+            100,
+        )
+      : null,
   };
 }
 

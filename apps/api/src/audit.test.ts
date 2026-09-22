@@ -266,7 +266,7 @@ describe("the fan-out stage", () => {
     expect(audit.fanout!.issued).toEqual(["b2b data vendors 2026"]);
   });
 
-  it("says why it skipped rather than reporting a silent zero", async () => {
+  it("still measures answerability when live search is gone", async () => {
     const audit = await runAudit("acme.test", () => {}, [], undefined, {
       provider: fakeProvider({
         ask: async () => {
@@ -274,9 +274,36 @@ describe("the fan-out stage", () => {
         },
       }),
     });
-    expect(audit.fanout!.measured).toBe(0);
-    expect(audit.fanout!.coverage).toBeNull();
-    expect(audit.fanout!.engineNote).toContain("live search was unavailable");
+    const fanout = audit.fanout!;
+    // No live answers, so nothing to say about being named or cited.
+    expect(fanout.measured).toBe(0);
+    expect(fanout.coverage).toBeNull();
+    expect(fanout.engineNote).toContain("SPECTRA's own retrieval");
+    // The crawler half ran anyway: that is the point of owning the retrieval.
+    expect(fanout.queries.length).toBeGreaterThan(0);
+    expect(fanout.indexedPages).toBeGreaterThan(0);
+    expect(fanout.answerableCoverage).not.toBeNull();
+    for (const query of fanout.queries) expect(query.retrieval).not.toBeNull();
+  });
+
+  it("retrieves the page that would answer each sub-query", async () => {
+    const audit = await runAudit("acme.test", () => {}, [], undefined, {
+      provider: fakeProvider(),
+    });
+    const fanout = audit.fanout!;
+    const canonical = fanout.queries.find(
+      (query) => query.type === "canonicalization",
+    )!;
+    // "b2b contact data provider" against a homepage titled "Acme Data | B2B
+    // data": the words that are not on the page are the ones to go and write.
+    expect(canonical.retrieval!.url).toBe("https://acme.test/");
+    expect(canonical.retrieval!.matched).toContain("b2b");
+    expect(canonical.retrieval!.missingTerms).toContain("provider");
+    expect(canonical.retrieval!.status).toBe("weak");
+    expect(canonical.retrieval!.snippet).not.toBe("");
+    expect(fanout.answerable + fanout.weak).toBeLessThanOrEqual(
+      fanout.queries.length,
+    );
   });
 
   it("keeps the audit alive when the expansion itself fails", async () => {
