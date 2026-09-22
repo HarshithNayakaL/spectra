@@ -120,6 +120,28 @@ page is /enterprise and it is missing _adyen_" is a thing you can go and write,
 and "score 1.27" is not. The board rolls the misses up into one brief: the
 words no page of yours carries, most-wanted first.
 
+### The crawler standing in for grounding
+
+Grounding does two jobs: it **finds** the pages that answer a query, and it
+**fetches** them. A crawler can fetch anything; it cannot find. So when live
+search is unavailable, SPECTRA names the competitive set instead — a plain
+model call that spends no search quota — and crawls it.
+
+Three rivals, four pages each, inside a hard time budget, fetched exactly the
+way we fetch your own site and through the same SSRF checks. Their pages join
+the same index, and every sub-query is then retrieved across the whole set. The
+report says, per sub-query, whether a rival's page would be handed to the model
+ahead of yours, and which one.
+
+It is a named competitive set, not the whole web, and the report never claims
+otherwise. What it gives you is the comparison that matters: **for this
+sub-query, does your page win or does theirs?**
+
+**There is no browser in SPECTRA.** The Rust crawler uses `reqwest`, the
+TypeScript path uses `undici`, and neither runs JavaScript — because the
+crawlers this product measures do not run JavaScript either. Rendering a page
+would measure something no answer engine ever sees.
+
 This runs with no API key at all. Point SPECTRA at a site with your own
 questions and it will tell you which of them your content could answer, without
 calling anything.

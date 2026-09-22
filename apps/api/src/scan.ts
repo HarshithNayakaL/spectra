@@ -532,3 +532,73 @@ function messageOf(error: unknown): string {
     ? messageOf(error.cause)
     : text;
 }
+
+/**
+ * A rival's site, fetched the way we fetch the customer's, and cheaply.
+ *
+ * This is the crawler standing in for grounding. A live search would find the
+ * pages that answer a sub-query anywhere on the web; we cannot find, but we
+ * can fetch, so the competitive set is named first and then crawled. It is a
+ * named set rather than the whole web, and the report says so.
+ *
+ * Deliberately small: the homepage plus the few pages an answer engine leans
+ * on, inside a hard time budget, because this runs inside an audit that is
+ * already against the clock.
+ */
+export async function crawlRival(
+  host: string,
+  options: { maxPages?: number; budgetMs?: number } = {},
+): Promise<{ host: string; pages: PageSignals[]; error: string }> {
+  const maxPages = options.maxPages ?? 4;
+  const started = Date.now();
+  const budget = options.budgetMs ?? 14_000;
+  let origin: URL;
+  try {
+    origin = new URL(
+      `https://${host.replace(/^https?:\/\//, "").replace(/\/.*$/, "")}`,
+    );
+  } catch {
+    return { host, pages: [], error: "not a usable hostname" };
+  }
+
+  let home: Fetched;
+  try {
+    home = await fetchPublic(origin, { maxBytes: 400_000, timeoutMs: 8_000 });
+  } catch (error) {
+    return { host, pages: [], error: messageOf(error) };
+  }
+  if (!isHtml(home))
+    return {
+      host,
+      pages: [],
+      error: `answered ${home.status} and no readable HTML`,
+    };
+
+  const pages = [readPage(home)];
+  const candidates = pickPages(
+    new URL(home.url),
+    pages[0].internalLinks,
+    new Set([normalise(home.url)]),
+  ).slice(0, maxPages - 1);
+  // One round, in parallel: a rival's site is context, not the measurement,
+  // and it must never be the reason an audit runs out of time.
+  await Promise.all(
+    candidates.map(async (url) => {
+      if (Date.now() - started > budget) return;
+      try {
+        const response = await fetchPublic(url, {
+          maxBytes: 400_000,
+          timeoutMs: 7_000,
+        });
+        if (isHtml(response)) pages.push(readPage(response));
+      } catch {
+        // A rival page we cannot read is simply not in the index.
+      }
+    }),
+  );
+  return {
+    host: new URL(home.url).hostname.replace(/^www\./, ""),
+    pages: pages.slice(0, maxPages),
+    error: "",
+  };
+}

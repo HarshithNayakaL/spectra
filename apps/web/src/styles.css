@@ -3706,3 +3706,23 @@ svg {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+
+/* The rival page a retriever would hand over instead of yours. */
+.fanRival {
+  margin: 0 0 8px;
+  font-size: var(--t-small);
+}
+.fanRival b {
+  color: var(--ink-2);
+}
+.fanRival.lost b {
+  color: var(--signal);
+}
+.fanRival .mono {
+  color: var(--ink-3);
+  font-size: var(--t-data);
+}
+.fanLost {
+  margin-left: 0;
+  font-weight: 700;
+}

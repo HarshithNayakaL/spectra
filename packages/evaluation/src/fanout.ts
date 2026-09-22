@@ -77,6 +77,8 @@ export function summariseFanout(input: {
   issued: string[];
   /** Pages our crawler indexed to run the retrieval step itself. */
   indexedPages: number;
+  /** The rival sites the crawler fetched, reachable or not. */
+  rivals: Fanout["rivals"];
 }): Fanout {
   const { queries, matcher } = input;
   const ok = queries.filter((query) => query.status === "ok");
@@ -142,6 +144,8 @@ export function summariseFanout(input: {
     // retrieval runs whether or not a live search was available, so this half
     // of the fan-out survives a dead grounding quota.
     indexedPages: input.indexedPages,
+    rivals: input.rivals,
+    lost: retrieved.filter((row) => row.lost).length,
     answerable: retrieved.filter((row) => row.status === "answered").length,
     weak: retrieved.filter((row) => row.status === "weak").length,
     answerableCoverage: retrieved.length

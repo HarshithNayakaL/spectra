@@ -15,6 +15,7 @@ import {
   normaliseSources,
   recognises,
   retrieve,
+  retrieveRanked,
   summariseFanout,
   summariseVisibility,
   type BrandMatcher,
@@ -32,11 +33,12 @@ import {
   type Audit,
   type Engine,
   type FanoutQuery,
+  type RivalSite,
   type PromptKind,
   type PromptResult,
 } from "@spectra/schemas";
 import { DEFAULT_MODEL } from "./models";
-import { scanSite, ScanError } from "./scan";
+import { crawlRival, scanSite, ScanError } from "./scan";
 import { saveAudit } from "./store";
 
 export type Progress = (
@@ -324,15 +326,62 @@ export async function runAudit(
   // sub-query whether or not a live search is available, and a dead grounding
   // quota costs the live answers rather than the whole stage. The index is
   // never stored; only what it retrieved is.
-  const corpus = buildIndex(
-    scan.pages.map((page) => ({
-      url: page.url,
-      title: page.title,
-      description: page.description,
-      headings: page.headings.map((heading) => heading.text),
-      text: page.excerpt,
-    })),
-  );
+  // Rivals first: a live search would find the pages that answer a sub-query
+  // anywhere on the web. We cannot find, but we can fetch, so the competitive
+  // set is named by the model — a plain call that spends no search quota — and
+  // then crawled. It is a named set rather than the whole web, and the report
+  // says exactly that.
+  const rivals: RivalSite[] = [];
+  const rivalPages: Array<ReturnType<typeof indexable>> = [];
+  if (timeLeft() > 60_000)
+    try {
+      await step("expanding", `Finding who ${audit.host} is measured against`);
+      const named = (
+        await provider.nameRivals({
+          profile: plain,
+          host: audit.host,
+          count: 3,
+        })
+      ).value.slice(0, 3);
+      if (named.length) {
+        await step(
+          "expanding",
+          `Crawling ${named.map((rival) => rival.host).join(", ")}`,
+        );
+        const crawled = await Promise.all(
+          named.map(async (rival) => ({
+            rival,
+            result: await crawlRival(rival.host, {
+              maxPages: 4,
+              budgetMs: Math.min(14_000, Math.max(6_000, timeLeft() - 50_000)),
+            }).catch((error) => ({
+              host: rival.host,
+              pages: [],
+              error: messageOf(error),
+            })),
+          })),
+        );
+        for (const { rival, result } of crawled) {
+          rivals.push({
+            name: rival.name,
+            host: result.host || rival.host,
+            pages: result.pages.length,
+            note: result.error,
+          });
+          for (const page of result.pages)
+            rivalPages.push(indexable(page, result.host || rival.host));
+        }
+      }
+    } catch (error) {
+      audit.warnings.push(
+        `The competitive set could not be named (${messageOf(error)}), so retrieval was measured against your site alone.`,
+      );
+    }
+
+  const corpus = buildIndex([
+    ...scan.pages.map((page) => indexable(page, audit.host)),
+    ...rivalPages,
+  ]);
 
   if (!seed) {
     // Nothing to expand: no question survived.
@@ -363,6 +412,7 @@ export async function runAudit(
           engineNote: note,
           issued: [...issued, ...rows.flatMap((row) => row.issuedQueries)],
           indexedPages: corpus.pages,
+          rivals,
         });
       };
       try {
@@ -372,7 +422,7 @@ export async function runAudit(
         for (const [position, item] of plan.entries()) {
           const id = `f${position + 1}`;
           // Retrieval first: it always runs, and never costs a request.
-          const retrieval = retrieve(corpus, item.query);
+          const retrieval = compare(corpus, item.query, audit.host);
           if (!live || timeLeft() < 22_000) {
             rows.push({ ...blankFanout(id, item), retrieval });
             publishFanout();
@@ -419,7 +469,7 @@ export async function runAudit(
               for (const [rest, next] of plan.slice(position + 1).entries())
                 rows.push({
                   ...blankFanout(`f${position + 2 + rest}`, next),
-                  retrieval: retrieve(corpus, next.query),
+                  retrieval: compare(corpus, next.query, audit.host),
                 });
               break;
             }
@@ -531,22 +581,14 @@ function retrievalOnlyFanout(
   host: string,
   note: string,
 ) {
-  const corpus = buildIndex(
-    scan.pages.map((page) => ({
-      url: page.url,
-      title: page.title,
-      description: page.description,
-      headings: page.headings.map((heading) => heading.text),
-      text: page.excerpt,
-    })),
-  );
+  const corpus = buildIndex(scan.pages.map((page) => indexable(page, host)));
   const queries = prompts.slice(0, 7).map((text, position) => ({
     ...blankFanout(`f${position + 1}`, {
       type: "equivalent" as const,
       query: text,
       covers: "Your own question, as you typed it",
     }),
-    retrieval: retrieve(corpus, text),
+    retrieval: compare(corpus, text, host),
   }));
   return summariseFanout({
     seed: prompts[0],
@@ -556,7 +598,52 @@ function retrievalOnlyFanout(
     engineNote: note,
     issued: [],
     indexedPages: corpus.pages,
+    rivals: [],
   });
+}
+
+/** One crawled page, in the shape the index wants. */
+function indexable(
+  page: NonNullable<Audit["scan"]>["pages"][number],
+  host: string,
+) {
+  return {
+    url: page.url,
+    host,
+    title: page.title,
+    description: page.description,
+    headings: page.headings.map((heading) => heading.text),
+    text: page.excerpt,
+  };
+}
+
+/**
+ * Your best page for a sub-query, and the rival page that would be retrieved
+ * ahead of it. "Lost" is decided by the BM25 score, because that is what
+ * decides which page a retriever hands to the model.
+ */
+function compare(
+  corpus: Parameters<typeof retrieveRanked>[0],
+  query: string,
+  host: string,
+) {
+  const mine = retrieve(corpus, query, { host });
+  const theirs = retrieveRanked(corpus, query, { limit: 8 }).find(
+    (hit) => hit.host !== host,
+  );
+  return {
+    ...mine,
+    rival: theirs
+      ? {
+          host: theirs.host,
+          url: theirs.url,
+          title: theirs.title,
+          coverage: theirs.coverage,
+          score: theirs.score,
+        }
+      : null,
+    lost: Boolean(theirs && theirs.score > mine.score),
+  };
 }
 
 function blankFanout(

@@ -33,6 +33,9 @@ export type Answer = {
   sources: Array<{ uri: string; title: string }>;
   queries: string[];
 };
+/** A rival the crawler should fetch, so retrieval has something to compare to. */
+export type Rival = { name: string; host: string };
+
 /** One sub-query an answer engine would fan a question out to. */
 export type FanoutPlan = {
   type: FanoutType;
@@ -57,6 +60,12 @@ export interface ModelProvider {
     seed: string;
     count: number;
   }): Promise<Result<FanoutPlan[]>>;
+  /** Names the sites a buyer would see instead, for the crawler to fetch. */
+  nameRivals(input: {
+    profile: Profile;
+    host: string;
+    count: number;
+  }): Promise<Result<Rival[]>>;
   analyseAnswers(
     profile: Profile,
     items: Array<{ id: string; prompt: string; answer: string }>,
@@ -148,6 +157,46 @@ const fanoutResponseSchema = {
     },
   },
   required: ["queries"],
+};
+
+const rivalsSchema = z.object({
+  rivals: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(80),
+        host: z
+          .string()
+          .min(3)
+          .max(120)
+          .transform((value) =>
+            value
+              .trim()
+              .toLowerCase()
+              .replace(/^https?:\/\//, "")
+              .replace(/^www\./, "")
+              .replace(/\/.*$/, ""),
+          )
+          .refine(
+            (value) => /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(value),
+            "Not a hostname",
+          ),
+      }),
+    )
+    .max(8),
+});
+const rivalsResponseSchema = {
+  type: "object",
+  properties: {
+    rivals: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { name: { type: "string" }, host: { type: "string" } },
+        required: ["name", "host"],
+      },
+    },
+  },
+  required: ["rivals"],
 };
 
 const moveResponseSchema = {
@@ -392,6 +441,47 @@ Each sub-query must be something a person could type into Google and get results
       fanoutResponseSchema,
     );
     return { ...result, value: result.value.queries };
+  }
+
+  /**
+   * The competitive set, named from the model's own knowledge. This is a plain
+   * generation call: it spends no search quota, which is the point — the
+   * crawler then fetches these sites and the retrieval comparison holds even
+   * when live search does not.
+   */
+  async nameRivals(input: {
+    profile: Profile;
+    host: string;
+    count: number;
+  }): Promise<Result<Rival[]>> {
+    const result = await this.structured(
+      `Name the ${input.count} companies a buyer would most likely see instead of this one when an AI assistant answers a question about this category, and give each one's primary website hostname.
+
+THE COMPANY: ${input.profile.brand} (${input.host})
+CATEGORY: ${input.profile.category}
+WHAT IT SELLS: ${input.profile.description}
+WHO BUYS IT: ${input.profile.audience || "unstated"}
+MARKET: ${input.profile.market || "unstated"}
+
+Rules:
+- Real, currently trading companies in the same category. Never invent one.
+- Direct competitors a buyer would shortlist against it, not review sites, directories, marketplaces or publishers. No g2.com, capterra.com, reddit.com, wikipedia.org.
+- Never ${input.host} itself, and no two entries on the same hostname.
+- "host" is the bare hostname of the company's own site: "mixpanel.com", not a URL, not a path, no "www.".
+- If you are not confident a company exists and trades in this category, leave it out and return fewer.`,
+      rivalsSchema,
+      rivalsResponseSchema,
+    );
+    const own = input.host.replace(/^www\./, "");
+    const seen = new Set<string>();
+    return {
+      ...result,
+      value: result.value.rivals.filter((rival) => {
+        if (rival.host === own || seen.has(rival.host)) return false;
+        seen.add(rival.host);
+        return true;
+      }),
+    };
   }
 
   async analyseAnswers(

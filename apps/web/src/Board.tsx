@@ -204,6 +204,23 @@ function RetrievalDetail({ retrieval }: { retrieval: Retrieval }) {
           Nothing we crawled matches this sub-query at all.
         </p>
       )}
+      {retrieval.rival && (
+        <p className={`fanRival ${retrieval.lost ? "lost" : ""}`}>
+          <b>{retrieval.lost ? "Retrieved instead: " : "Closest rival: "}</b>
+          <a
+            href={retrieval.rival.url}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            {retrieval.rival.host}
+            {pathOf(retrieval.rival.url)}
+          </a>
+          <span className="mono">
+            {" "}
+            at {Math.round(retrieval.rival.coverage * 100)}% of the terms
+          </span>
+        </p>
+      )}
       {retrieval.missingTerms.length > 0 && (
         <p className="fanRetTerms">
           <b>Missing from it: </b>
@@ -271,7 +288,18 @@ export function FanoutSection({ audit }: { audit: Audit }) {
               </p>
               <p className="scoreSub">
                 Retrieved by SPECTRA over the <b>{fanout.indexedPages}</b> pages
-                we crawled — no live search needed.
+                we crawled
+                {fanout.rivals.filter((rival) => rival.pages).length ? (
+                  <>
+                    {" "}
+                    across your site and{" "}
+                    {fanout.rivals
+                      .filter((rival) => rival.pages)
+                      .map((rival) => rival.host)
+                      .join(", ")}
+                  </>
+                ) : null}
+                . No live search needed.
               </p>
             </section>
 
@@ -449,6 +477,11 @@ function FanoutRow({
         </span>
         <span className="qSide">
           {query.cited && <span className="chip good">Cited you</span>}
+          {retrieval?.lost && retrieval.rival && (
+            <span className="chip bad fanLost">
+              {retrieval.rival.host} wins
+            </span>
+          )}
           {retrieval && (query.status === "ok" || retrieval.url) && (
             <span className={`chip fanRetrieval ${retrieval.status}`}>
               {retrieval.url

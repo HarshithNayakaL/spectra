@@ -293,6 +293,7 @@ function retrievalStage(audit: Audit, live: boolean): Stage {
           ],
       href: "#fanout",
     };
+  const lost = rows.filter((row) => row.retrieval!.lost);
   const answered = rows.filter((row) => row.retrieval!.status === "answered");
   const weak = rows.filter((row) => row.retrieval!.status === "weak");
   const absent = rows.filter((row) => row.retrieval!.status === "missing");
@@ -318,6 +319,17 @@ function retrievalStage(audit: Audit, live: boolean): Stage {
     facts: [
       { label: "Pages indexed", value: String(fanout?.indexedPages ?? 0) },
       {
+        label: "Sites compared",
+        value: (fanout?.rivals ?? []).length
+          ? `you + ${(fanout?.rivals ?? []).filter((rival) => rival.pages).length}`
+          : "you only",
+      },
+      {
+        label: "A rival's page wins",
+        value: `${lost.length}/${rows.length}`,
+        bad: lost.length > 0,
+      },
+      {
         label: "A page answers it",
         value: `${answered.length}/${rows.length}`,
         bad: answered.length === 0,
@@ -336,6 +348,11 @@ function retrievalStage(audit: Audit, live: boolean): Stage {
     missing: [
       ...absent.slice(0, 5).map((row) => ({
         text: `No page of yours is about "${row.query}".`,
+        severity: "high" as const,
+        href: "#fanout",
+      })),
+      ...lost.slice(0, 5).map((row) => ({
+        text: `${row.retrieval!.rival!.host} would be retrieved ahead of you for "${row.query}".`,
         severity: "high" as const,
         href: "#fanout",
       })),

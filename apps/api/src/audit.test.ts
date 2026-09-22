@@ -13,6 +13,13 @@ process.env.SPECTRA_DATA_DIR = mkdtempSync(join(tmpdir(), "spectra-audit-"));
 
 vi.mock("./scan", () => ({
   ScanError: class extends Error {},
+  // The rival crawl is real network work; here it stands for a host that does
+  // not resolve, which is the path that must not take the audit down.
+  crawlRival: async (host: string) => ({
+    host,
+    pages: [],
+    error: "getaddrinfo ENOTFOUND",
+  }),
   scanSite: async () =>
     scanSchema.parse({
       target: "https://acme.test/",
@@ -73,6 +80,11 @@ function fakeProvider(overrides: Partial<ModelProvider> = {}): ModelProvider {
         sources: [{ uri: "https://r.test/1", title: "g2.com" }],
         queries: [],
       },
+      usage: {},
+      durationMs: 1,
+    }),
+    nameRivals: async () => ({
+      value: [{ name: "ZoomInfo", host: "zoominfo.test" }],
       usage: {},
       durationMs: 1,
     }),
@@ -284,6 +296,23 @@ describe("the fan-out stage", () => {
     expect(fanout.indexedPages).toBeGreaterThan(0);
     expect(fanout.answerableCoverage).not.toBeNull();
     for (const query of fanout.queries) expect(query.retrieval).not.toBeNull();
+  });
+
+  it("records the rivals it was told to crawl, reachable or not", async () => {
+    const audit = await runAudit("acme.test", () => {}, [], undefined, {
+      provider: fakeProvider(),
+    });
+    const rivals = audit.fanout!.rivals;
+    expect(rivals).toHaveLength(1);
+    expect(rivals[0]).toMatchObject({
+      name: "ZoomInfo",
+      host: "zoominfo.test",
+    });
+    // The fixture site does not serve that host, so it is recorded as
+    // unreachable rather than silently dropped.
+    expect(rivals[0].pages).toBe(0);
+    expect(rivals[0].note).not.toBe("");
+    expect(audit.status).toBe("complete");
   });
 
   it("retrieves the page that would answer each sub-query", async () => {

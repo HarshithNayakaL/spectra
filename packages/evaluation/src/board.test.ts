@@ -141,6 +141,8 @@ describe("buildBoard", () => {
         matched: [],
         missingTerms: over.missingTerms ?? ["alternatives", "migration"],
         snippet: "",
+        rival: null,
+        lost: false,
       },
     });
     const board = buildBoard(
@@ -163,6 +165,8 @@ describe("buildBoard", () => {
           answeredBy: [],
           issued: [],
           indexedPages: 12,
+          rivals: [],
+          lost: 0,
           answerable: 1,
           weak: 0,
           answerableCoverage: 33,
@@ -201,6 +205,8 @@ describe("buildBoard", () => {
           answeredBy: [{ domain: "g2.com", count: 5, own: false }],
           issued: [],
           indexedPages: 12,
+          rivals: [],
+          lost: 0,
           answerable: 2,
           weak: 1,
           answerableCoverage: 33,

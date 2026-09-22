@@ -19,6 +19,8 @@
 
 export type IndexedPage = {
   url: string;
+  /** The site this page belongs to, without "www.". */
+  host: string;
   title: string;
   description: string;
   headings: string[];
@@ -27,6 +29,7 @@ export type IndexedPage = {
 
 type Doc = {
   url: string;
+  host: string;
   title: string;
   /** Term frequencies over the weighted field text. */
   freq: Map<string, number>;
@@ -44,9 +47,10 @@ export type RetrievalIndex = {
 };
 
 export type Retrieved = {
-  /** Whether a page of yours is good enough to be the one retrieved. */
+  /** Whether the page is good enough to be the one retrieved. */
   status: "answered" | "weak" | "missing";
   url: string;
+  host: string;
   title: string;
   /** BM25, kept for ordering and for the record. Never shown as a verdict. */
   score: number;
@@ -106,6 +110,7 @@ export function buildIndex(pages: IndexedPage[]): RetrievalIndex {
     for (const token of tokens) freq.set(token, (freq.get(token) ?? 0) + 1);
     return {
       url: page.url,
+      host: page.host,
       title: page.title,
       freq,
       length: tokens.length,
@@ -137,22 +142,21 @@ const ANSWERED = 0.75;
 /** Below this, the page is about something else. */
 const WEAK = 0.4;
 
-export function retrieve(index: RetrievalIndex, query: string): Retrieved {
+/**
+ * Every page that matches, best first. One index can hold your site and the
+ * rivals it is measured against, so the caller can ask both "what is my best
+ * page" and "whose page beats it".
+ */
+export function retrieveRanked(
+  index: RetrievalIndex,
+  query: string,
+  options: { host?: string; limit?: number } = {},
+): Retrieved[] {
   const terms = [...new Set(tokenise(query))];
-  const empty: Retrieved = {
-    status: "missing",
-    url: "",
-    title: "",
-    score: 0,
-    coverage: 0,
-    matched: [],
-    missingTerms: terms,
-    snippet: "",
-  };
-  if (!terms.length || !index.docs.length) return empty;
-
-  let best: { doc: Doc; score: number } | null = null;
+  if (!terms.length || !index.docs.length) return [];
+  const scored: Array<{ doc: Doc; score: number }> = [];
   for (const doc of index.docs) {
+    if (options.host && doc.host !== options.host) continue;
     let score = 0;
     for (const term of terms) {
       const frequency = doc.freq.get(term);
@@ -164,23 +168,52 @@ export function retrieve(index: RetrievalIndex, query: string): Retrieved {
           K1 * (1 - B + (B * doc.length) / (index.averageLength || 1)));
       score += idf * norm;
     }
-    if (score > 0 && (!best || score > best.score)) best = { doc, score };
+    if (score > 0) scored.push({ doc, score });
   }
-  if (!best) return empty;
+  scored.sort(
+    (a, b) => b.score - a.score || a.doc.url.localeCompare(b.doc.url),
+  );
+  return scored.slice(0, options.limit ?? 5).map(({ doc, score }) => {
+    const matched = terms.filter((term) => doc.freq.has(term));
+    const coverage = matched.length / terms.length;
+    return {
+      status: (coverage >= ANSWERED
+        ? "answered"
+        : coverage >= WEAK
+          ? "weak"
+          : "missing") as Retrieved["status"],
+      url: doc.url,
+      host: doc.host,
+      title: doc.title,
+      score: Math.round(score * 100) / 100,
+      coverage: Math.round(coverage * 100) / 100,
+      matched,
+      missingTerms: terms.filter((term) => !doc.freq.has(term)),
+      snippet: snippetFor(doc.body, matched),
+    };
+  });
+}
 
-  const matched = terms.filter((term) => best!.doc.freq.has(term));
-  const coverage = matched.length / terms.length;
-  return {
-    status:
-      coverage >= ANSWERED ? "answered" : coverage >= WEAK ? "weak" : "missing",
-    url: best.doc.url,
-    title: best.doc.title,
-    score: Math.round(best.score * 100) / 100,
-    coverage: Math.round(coverage * 100) / 100,
-    matched,
-    missingTerms: terms.filter((term) => !best!.doc.freq.has(term)),
-    snippet: snippetFor(best.doc.body, matched),
-  };
+/** The single page that would be retrieved, optionally from one host only. */
+export function retrieve(
+  index: RetrievalIndex,
+  query: string,
+  options: { host?: string } = {},
+): Retrieved {
+  const [best] = retrieveRanked(index, query, { ...options, limit: 1 });
+  return (
+    best ?? {
+      status: "missing",
+      url: "",
+      host: options.host ?? "",
+      title: "",
+      score: 0,
+      coverage: 0,
+      matched: [],
+      missingTerms: [...new Set(tokenise(query))],
+      snippet: "",
+    }
+  );
 }
 
 /**

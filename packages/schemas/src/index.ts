@@ -228,6 +228,24 @@ export const fanoutTypeSchema = z.enum([
  * This is the retrieval step run ourselves, so it holds whether or not a live
  * search was available.
  */
+/** A rival site the crawler fetched, so retrieval has something to compare to. */
+export const rivalSiteSchema = z.object({
+  name: z.string(),
+  host: z.string(),
+  /** Pages we could read. Zero means the site refused or did not resolve. */
+  pages: z.number().int().default(0),
+  note: z.string().default(""),
+});
+
+/** The best page on one host for one sub-query. */
+export const retrievalHitSchema = z.object({
+  host: z.string().default(""),
+  url: z.string().default(""),
+  title: z.string().default(""),
+  coverage: z.number().min(0).max(1).default(0),
+  score: z.number().default(0),
+});
+
 export const retrievalSchema = z.object({
   status: z.enum(["answered", "weak", "missing"]),
   /** The page of yours that would be retrieved, when one would be. */
@@ -241,6 +259,13 @@ export const retrievalSchema = z.object({
   /** The words your best page does not have. The thing to go and write. */
   missingTerms: z.array(z.string()).default([]),
   snippet: z.string().default(""),
+  /**
+   * The rival page that would be retrieved for the same sub-query, when rival
+   * sites were crawled. Null when there were none to compare against.
+   */
+  rival: retrievalHitSchema.nullable().default(null),
+  /** True when a rival's page scores above yours for this sub-query. */
+  lost: z.boolean().default(false),
 });
 
 export const fanoutQuerySchema = z.object({
@@ -313,6 +338,10 @@ export const fanoutSchema = z.object({
   issued: z.array(z.string()).default([]),
   /** Pages our crawler indexed to answer the retrieval step itself. */
   indexedPages: z.number().int().default(0),
+  /** The rival sites the crawler fetched to compare against. */
+  rivals: z.array(rivalSiteSchema).default([]),
+  /** Sub-queries a rival's page would be retrieved ahead of yours. */
+  lost: z.number().int().default(0),
   /** Sub-queries a page of yours could actually be retrieved for. */
   answerable: z.number().int().default(0),
   /** Sub-queries where a page exists but is too thin to win, 0 when none. */
@@ -321,6 +350,8 @@ export const fanoutSchema = z.object({
   answerableCoverage: z.number().min(0).max(100).nullable().default(null),
 });
 
+export type RivalSite = z.infer<typeof rivalSiteSchema>;
+export type RetrievalHit = z.infer<typeof retrievalHitSchema>;
 export type Retrieval = z.infer<typeof retrievalSchema>;
 export type FanoutType = z.infer<typeof fanoutTypeSchema>;
 export type FanoutQuery = z.infer<typeof fanoutQuerySchema>;

@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   buildIndex,
   retrieve,
+  retrieveRanked,
   snippetFor,
   tokenise,
   type IndexedPage,
 } from "./retrieval";
 
 const page = (over: Partial<IndexedPage> & { url: string }): IndexedPage => ({
+  host: "acme.test",
   title: "",
   description: "",
   headings: [],
@@ -38,6 +40,15 @@ const site = [
     text: "We are hiring engineers and account executives in Austin.",
   }),
 ];
+
+const rival = page({
+  url: "https://rival.test/compare",
+  host: "rival.test",
+  title: "Rival vs Acme Data | Rival",
+  description: "How Rival compares to Acme Data on contact data.",
+  headings: ["Rival vs Acme Data"],
+  text: "Rival and Acme Data both sell verified b2b contact data to sales teams.",
+});
 
 describe("tokenise", () => {
   it("drops the words that cannot tell two pages apart", () => {
@@ -110,6 +121,27 @@ describe("retrieve", () => {
     const a = retrieve(index, "verified contact data");
     const b = retrieve(buildIndex(site), "verified contact data");
     expect(a).toEqual(b);
+  });
+
+  it("names the rival page that would be retrieved ahead of yours", () => {
+    const both = buildIndex([...site, rival]);
+    const ranked = retrieveRanked(both, "rival vs acme data comparison");
+    expect(ranked[0].host).toBe("rival.test");
+    expect(ranked[0].url).toBe("https://rival.test/compare");
+    // Your own best page is still reachable, scoped to your host.
+    const mine = retrieve(both, "rival vs acme data comparison", {
+      host: "acme.test",
+    });
+    expect(mine.host).toBe("acme.test");
+    expect(mine.score).toBeLessThan(ranked[0].score);
+  });
+
+  it("scopes retrieval to one host when asked", () => {
+    const both = buildIndex([...site, rival]);
+    for (const hit of retrieveRanked(both, "contact data", {
+      host: "acme.test",
+    }))
+      expect(hit.host).toBe("acme.test");
   });
 
   it("handles an empty crawl and an empty query without throwing", () => {
