@@ -42,6 +42,8 @@ export type PageCitability = {
   paragraphs: number;
   /** The single change that would earn this page the most points. */
   next: string;
+  /** True when the page ships no text, so its checks cannot add up. */
+  shell: boolean;
 };
 
 export type Citability = {
@@ -82,7 +84,13 @@ function factsIn(text: string) {
 }
 
 export function scorePage(page: PageSignals): PageCitability {
-  const base = { url: page.url, best: "", liftable: 0, paragraphs: 0 };
+  const base = {
+    url: page.url,
+    best: "",
+    liftable: 0,
+    paragraphs: 0,
+    shell: false,
+  };
   if (!page.structureRead)
     return {
       ...base,
@@ -132,7 +140,7 @@ export function scorePage(page: PageSignals): PageCitability {
       possible: 20,
       earned: Math.min(20, liftable.length * 5),
       detail: passages.length
-        ? `${liftable.length} of ${passages.length} paragraphs are quote-sized (${MIN_LIFT}-${MAX_LIFT} words) and stand on their own.${
+        ? `${liftable.length} of ${passages.length} ${passages.length === 1 ? "paragraph is" : "paragraphs are"} quote-sized (${MIN_LIFT}-${MAX_LIFT} words) and stand on their own.${
             passages.length > liftable.length
               ? ` Of the rest, ${[
                   flaws.short && `${flaws.short} too short`,
@@ -217,6 +225,7 @@ export function scorePage(page: PageSignals): PageCitability {
     best,
     liftable: liftable.length,
     paragraphs: passages.length,
+    shell: page.appShell,
     next: page.appShell
       ? "Render the page's text into the HTML. AI crawlers do not run JavaScript, so today there is nothing to quote."
       : worst && worst.earned < worst.possible

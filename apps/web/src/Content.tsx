@@ -300,6 +300,13 @@ function CitabilityRow({
       </button>
       {open && (
         <div className="qDetail">
+          {page.shell && (
+            <p className="muted small">
+              Scored 0: this page ships under 120 words of HTML and builds the
+              rest with JavaScript, which AI crawlers do not run. The checks
+              below describe the little that is there.
+            </p>
+          )}
           <ul className="citeChecks">
             {page.checks.map((check) => (
               <li
