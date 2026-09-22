@@ -348,3 +348,22 @@ describe("the fan-out stage", () => {
     expect(audit.visibility!.measured).toBeGreaterThan(0);
   });
 });
+
+describe("who wins a sub-query", () => {
+  it("does not call a denser rival page a winner when it carries fewer terms", async () => {
+    // Pinning the rule that a page with a quarter of the sub-query's terms
+    // must never be reported as beating one with three quarters, whatever
+    // BM25 makes of their lengths.
+    const audit = await runAudit("acme.test", () => {}, [], undefined, {
+      provider: fakeProvider(),
+    });
+    for (const query of audit.fanout!.queries) {
+      const retrieval = query.retrieval!;
+      if (!retrieval.lost) continue;
+      expect(retrieval.rival).not.toBeNull();
+      expect(retrieval.rival!.coverage).toBeGreaterThanOrEqual(
+        retrieval.coverage,
+      );
+    }
+  });
+});

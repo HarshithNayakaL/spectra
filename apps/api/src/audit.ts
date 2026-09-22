@@ -619,8 +619,14 @@ function indexable(
 
 /**
  * Your best page for a sub-query, and the rival page that would be retrieved
- * ahead of it. "Lost" is decided by the BM25 score, because that is what
- * decides which page a retriever hands to the model.
+ * ahead of it.
+ *
+ * "Lost" is decided on term coverage, not the raw BM25 score. BM25 rewards
+ * density, and a rival's four crawled pages include short ones where a couple
+ * of matched terms score highly — which reported a page carrying a quarter of
+ * the sub-query as beating one carrying three quarters. Coverage is the
+ * verdict everywhere else in this product for the same reason: it is the thing
+ * an operator can act on. The score only breaks a tie.
  */
 function compare(
   corpus: Parameters<typeof retrieveRanked>[0],
@@ -642,7 +648,11 @@ function compare(
           score: theirs.score,
         }
       : null,
-    lost: Boolean(theirs && theirs.score > mine.score),
+    lost: Boolean(
+      theirs &&
+      (theirs.coverage > mine.coverage ||
+        (theirs.coverage === mine.coverage && theirs.score > mine.score)),
+    ),
   };
 }
 
