@@ -949,6 +949,9 @@ svg {
   gap: 16px;
   scroll-margin-top: calc(var(--header) + 20px);
 }
+.span3 {
+  grid-column: span 3;
+}
 .span4 {
   grid-column: span 4;
 }
@@ -1808,6 +1811,7 @@ svg {
   .railNav a[aria-current="true"] {
     border-bottom-color: var(--ink);
   }
+  .span3,
   .span4,
   .span5,
   .span6,
