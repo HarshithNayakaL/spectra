@@ -4024,26 +4024,43 @@ svg {
     justify-self: start;
   }
 }
-/* Five tools do not fit beside the brand on a phone: the row scrolls. */
+/* Five tools do not fit beside the brand on a phone. Rather than hide the
+   last two in a scroll strip nobody finds, they get their own row under the
+   brand, each an equal share of the width and a full touch target. */
 @media (width < 48rem) {
-  .topNav {
-    min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
-    margin-left: 8px;
+  :root {
+    --header: 101px;
   }
-  .topNav::-webkit-scrollbar {
-    display: none;
+  .top {
+    flex-wrap: wrap;
+    align-content: center;
+    row-gap: 0;
+    padding-top: 6px;
+  }
+  .brand {
+    min-height: 44px;
+  }
+  .topMeta {
+    margin-left: auto;
+  }
+  .topNav {
+    order: 3;
+    flex: 1 0 100%;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 2px;
+    margin: 0 0 6px;
   }
   .topNav a {
-    flex: none;
-    padding-inline: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    padding: 0 4px;
+    font-size: var(--t-data);
   }
-}
-.durability {
-  margin-bottom: 16px;
-  padding: 14px 18px;
-  font-size: var(--t-small);
-  line-height: 1.55;
-  border-color: var(--signal);
+  .topNav a[aria-current="page"]::after {
+    right: 8px;
+    left: 8px;
+  }
 }
