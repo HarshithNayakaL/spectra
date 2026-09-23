@@ -516,7 +516,8 @@ svg {
   transition:
     top 3.4s cubic-bezier(0.34, 0.01, 0.2, 1),
     left 3.4s cubic-bezier(0.34, 0.01, 0.2, 1),
-    transform 460ms cubic-bezier(0.22, 1, 0.36, 1);
+    transform 460ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity var(--base) var(--ease);
   animation: bob 5.2s ease-in-out infinite;
   filter: drop-shadow(0 14px 26px oklch(0.2 0.01 265 / 0.22));
   pointer-events: none;
@@ -556,6 +557,25 @@ svg {
 }
 .cloudee:hover .cloudeeTag {
   opacity: 1;
+}
+/* Until he has measured a clear spot he is not shown, so the first frame
+   never lands him on a button. */
+.cloudee:not(.placed) {
+  opacity: 0;
+}
+/* Typing on a phone: he steps off screen instead of sitting on the field. */
+.cloudeeLayer.away .cloudee {
+  opacity: 0;
+  pointer-events: none;
+}
+.cloudeeLayer.away .cloudeePoke,
+.cloudee.moving .cloudeePoke {
+  pointer-events: none;
+}
+@media (hover: none) {
+  .cloudeeTag {
+    display: none;
+  }
 }
 
 @keyframes bob {
@@ -2377,28 +2397,17 @@ svg {
     flex: 1;
   }
 
-  /* Cloudee docks in the corner on phones instead of drifting over text. */
+  /* On phones he drifts too, smaller, to spots measured to be clear of
+     every control (see Cloudee.tsx). */
   .cloudee {
-    --size: 58px;
-    top: auto !important;
-    left: auto !important;
-    right: 10px;
-    bottom: calc(18px + env(safe-area-inset-bottom));
-    margin: 0 !important;
-    animation: bobDock 3.2s ease-in-out infinite;
-  }
-  body:has(.mobileBar) .cloudee {
-    bottom: calc(82px + env(safe-area-inset-bottom));
-  }
-  .cloudeeTag {
-    display: none;
+    --size: 60px;
+    transition:
+      top 2.6s cubic-bezier(0.34, 0.01, 0.2, 1),
+      left 2.6s cubic-bezier(0.34, 0.01, 0.2, 1),
+      opacity var(--base) var(--ease);
   }
 }
-@keyframes bobDock {
-  50% {
-    translate: 0 -6px;
-  }
-}
+
 @media (pointer: coarse) {
   .btn,
   .codeHead .btn {
