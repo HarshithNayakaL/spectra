@@ -89,10 +89,17 @@ by three checks against <https://spectra-ai-aeo.vercel.app>:
 ## What this product claims, and therefore must not do
 
 - **No browser, no JavaScript execution.** The Rust crawler uses `reqwest`; the
-  TypeScript path uses `undici` via `fetchPublic`. AI crawlers do not run
+  TypeScript path uses `node:http`/`node:https` via `fetchPublic`. AI crawlers do not run
   JavaScript, so rendering a page would measure something no answer engine ever
   sees, and `javascript_only` would stop being a finding. Playwright is a
   testing tool here, never a crawler.
+- **Never decode Brotli (or anything but gzip and deflate) from a crawled
+  site.** Every page fetched is chosen by whoever typed the URL, and
+  CVE-2026-111497 made Node's bundled Brotli decoder a remote-code-execution
+  path. Do not reintroduce `fetch()` for crawling: it decodes Brotli whenever
+  a server sends it, asked for or not. `fetchPublic` reads raw bytes and
+  refuses other codings; `apps/api/src/fetch.test.ts` holds that line, and
+  `/api/health` reports `runtimePatched` for the runtime itself.
 - **The model never decides a verdict.** It may choose where to go (the journey
   navigator), what to ask (the fan-out expansion) and who the rivals are. Every
   pass, fail, score and outcome is computed from the responses in

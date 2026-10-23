@@ -138,7 +138,8 @@ otherwise. What it gives you is the comparison that matters: **for this
 sub-query, does your page win or does theirs?**
 
 **There is no browser in SPECTRA.** The Rust crawler uses `reqwest`, the
-TypeScript path uses `undici`, and neither runs JavaScript — because the
+TypeScript path uses `node:http`/`node:https` and decodes only gzip and
+deflate (never Brotli: see CVE-2026-111497), and neither runs JavaScript — because the
 crawlers this product measures do not run JavaScript either. Rendering a page
 would measure something no answer engine ever sees.
 
