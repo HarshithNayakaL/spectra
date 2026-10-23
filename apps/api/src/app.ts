@@ -27,6 +27,13 @@ import {
 } from "./store";
 import { InspectError, inspectUrl } from "./inspect";
 import { hostsOf, runCompare } from "./compare";
+import { FIXED_VERSIONS, runtimePatched } from "./runtime";
+
+// Said once at cold start, where an operator reading logs will see it.
+if (runtimePatched() === false)
+  console.warn(
+    `SPECTRA: Node.js ${process.version} predates the October 2026 security release. Upgrade to ${FIXED_VERSIONS}.`,
+  );
 
 export const app = new Hono();
 const allowedOrigins = new Set(
@@ -65,6 +72,10 @@ app.get("/api/health", (c) =>
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
     storage: storeKind,
     runtime: process.env.VERCEL ? "vercel" : "node",
+    // Whether the runtime carries the October 2026 Node.js security release.
+    // A boolean rather than the version string: enough to verify a patch
+    // landed, without publishing the exact build to anyone who asks.
+    runtimePatched: runtimePatched(),
     runningAudits: running,
     runningJourneys: walking,
   }),

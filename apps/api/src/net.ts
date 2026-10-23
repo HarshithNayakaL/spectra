@@ -1,6 +1,9 @@
 import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
-import { Agent } from "undici";
+import { request as httpRequest, type IncomingMessage } from "node:http";
+import { request as httpsRequest } from "node:https";
+import { isIP, type LookupFunction } from "node:net";
+import type { Readable } from "node:stream";
+import { createGunzip, createInflate } from "node:zlib";
 
 const MAX_BYTES = 2_097_152;
 const TIMEOUT_MS = 10_000;
@@ -19,6 +22,34 @@ export type Fetched = {
 };
 
 /**
+ * The only content codings SPECTRA will decode. Brotli is deliberately absent:
+ * CVE-2026-111497 (Node.js security release, 21 October 2026) is an
+ * out-of-bounds write in the bundled Brotli decoder that permits remote code
+ * execution, and every page this service fetches is chosen by whoever typed
+ * the URL. Node's fetch() decodes Brotli whenever a server sends it, asked or
+ * not, so this module does not use fetch() at all: it reads the raw bytes with
+ * node:http and node:https, which never decompress anything, decodes gzip and
+ * deflate itself under a size cap, and
+ * refuses any other coding without handing a single byte to a decoder. That
+ * holds whatever runtime version the host happens to be running.
+ */
+const ACCEPT_ENCODING = "gzip, deflate";
+const DECODABLE = new Set(["gzip", "x-gzip", "deflate"]);
+
+/** A server answered in a coding SPECTRA refuses to decode. */
+export class EncodingRefusedError extends Error {
+  constructor(
+    readonly status: number,
+    readonly encoding: string,
+  ) {
+    super(
+      `The server sent its response ${encoding}-encoded although only ${ACCEPT_ENCODING} was accepted, so it was not decoded.`,
+    );
+    this.name = "EncodingRefusedError";
+  }
+}
+
+/**
  * Fetches a public URL and reports whatever status came back; only network
  * and safety failures throw. The redirect chain is re-validated at every hop
  * and the connection is pinned to addresses that were checked as public, so a
@@ -26,23 +57,37 @@ export type Fetched = {
  */
 export async function fetchPublic(
   target: string | URL,
-  options: {
-    userAgent?: string;
-    accept?: string;
-    maxBytes?: number;
-    timeoutMs?: number;
-  } = {},
+  options: FetchOptions = {},
+): Promise<Fetched> {
+  return fetchValidated(target, options, validatePublicUrl);
+}
+
+type FetchOptions = {
+  userAgent?: string;
+  accept?: string;
+  maxBytes?: number;
+  timeoutMs?: number;
+};
+
+/**
+ * fetchPublic with the address check passed in. Exported for tests alone,
+ * which need a local server the public check rightly refuses; production code
+ * calls fetchPublic and never chooses its own validator.
+ */
+export async function fetchValidated(
+  target: string | URL,
+  options: FetchOptions,
+  validate: typeof validatePublicUrl,
 ): Promise<Fetched> {
   const started = Date.now();
+  const limit = options.maxBytes ?? MAX_BYTES;
   let current = new URL(String(target));
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
-    const { url, addresses } = await validatePublicUrl(current.href);
+    const { url, addresses } = await validate(current.href);
     current = url;
-    const dispatcher = pinnedDispatcher(addresses);
-    let response: Response;
+    let response: IncomingMessage | null = null;
     try {
-      response = await fetch(current, {
-        redirect: "manual",
+      response = await get(current, addresses, {
         signal: AbortSignal.timeout(options.timeoutMs ?? TIMEOUT_MS),
         headers: {
           "user-agent": options.userAgent ?? SPECTRA_AGENT,
@@ -50,109 +95,184 @@ export async function fetchPublic(
             options.accept ??
             "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
           "accept-language": "en",
+          "accept-encoding": ACCEPT_ENCODING,
         },
-        // @ts-expect-error -- undici extension, honoured by Node's global fetch
-        dispatcher,
       });
-    } catch (error) {
-      await dispatcher.close().catch(() => {});
-      throw error instanceof Error && error.name === "TimeoutError"
-        ? new Error("Timed out after 10s")
-        : error;
-    }
-    if (response.status >= 300 && response.status < 400) {
-      await response.body?.cancel().catch(() => {});
-      await dispatcher.close().catch(() => {});
-      const location = response.headers.get("location");
-      if (!location) throw new Error("Redirect without a location header.");
-      try {
-        current = new URL(location, current);
-      } catch {
-        throw new Error("Redirect to an unusable location.");
+      const headers = toHeaders(response.headers);
+      const status = response.statusCode ?? 0;
+      if (status >= 300 && status < 400) {
+        discard(response);
+        const location = headers.get("location");
+        if (!location) throw new Error("Redirect without a location header.");
+        try {
+          current = new URL(location, current);
+        } catch {
+          throw new Error("Redirect to an unusable location.");
+        }
+        continue;
       }
-      continue;
+      const codings = codingsOf(headers.get("content-encoding"));
+      const refused = codings.find((coding) => !DECODABLE.has(coding));
+      if (refused) {
+        // Discarded unread: these bytes never reach a decoder.
+        discard(response);
+        throw new EncodingRefusedError(status, refused);
+      }
+      const { text, bytes } = await readDecoded(response, codings, limit);
+      return {
+        status,
+        url: current.href,
+        headers,
+        body: text,
+        bytes,
+        ms: Date.now() - started,
+      };
+    } catch (error) {
+      throw isTimeout(error) ? new Error("Timed out after 10s") : error;
+    } finally {
+      // No keep-alive: every request is its own pinned connection, which also
+      // keeps this clear of the keep-alive desync fixed in the same release.
+      if (response && !response.destroyed) discard(response);
     }
-    pending.set(response, dispatcher);
-    const { text, bytes } = await readBounded(
-      response,
-      options.maxBytes ?? MAX_BYTES,
-    );
-    return {
-      status: response.status,
-      url: current.href,
-      headers: response.headers,
-      body: text,
-      bytes,
-      ms: Date.now() - started,
-    };
   }
   throw new Error("Too many redirects.");
 }
 
-const pending = new WeakMap<Response, Agent>();
+/**
+ * Ignores the hostname entirely: only the addresses validated moments ago are
+ * reachable, so a second DNS answer cannot redirect the connection. TLS still
+ * verifies the certificate against the hostname in the URL.
+ */
+function pinnedLookup(addresses: string[]): LookupFunction {
+  return (_hostname, options, callback) => {
+    const resolved = addresses.map((address) => ({
+      address,
+      family: isIP(address),
+    }));
+    const wanted =
+      options.family === 4 || options.family === 6
+        ? resolved.filter((entry) => entry.family === options.family)
+        : resolved;
+    if (!wanted.length)
+      return callback(
+        new Error("No validated public address for this host."),
+        "",
+        0,
+      );
+    if (options.all) return (callback as never as AllCallback)(null, wanted);
+    callback(null, wanted[0].address, wanted[0].family);
+  };
+}
+type AllCallback = (
+  error: Error | null,
+  addresses: Array<{ address: string; family: number }>,
+) => void;
 
-function pinnedDispatcher(addresses: string[]) {
-  return new Agent({
-    connect: {
-      // Ignore the hostname entirely: only the addresses validated moments ago
-      // are reachable, so a second DNS answer cannot redirect the connection.
-      lookup(_hostname, options, callback) {
-        const resolved = addresses.map((address) => ({
-          address,
-          family: isIP(address),
-        }));
-        const wanted =
-          options.family === 4 || options.family === 6
-            ? resolved.filter((entry) => entry.family === options.family)
-            : resolved;
-        if (!wanted.length)
-          return callback(
-            new Error("No validated public address for this host."),
-            // @ts-expect-error -- error path, no address to supply
-            undefined,
-            undefined,
-          );
-        return options.all
-          ? callback(null, wanted as never)
-          : callback(null, wanted[0].address as never, wanted[0].family);
-      },
-    },
+/** One GET on a fresh, pinned connection; resolves once headers arrive. */
+function get(
+  url: URL,
+  addresses: string[],
+  options: { signal: AbortSignal; headers: Record<string, string> },
+): Promise<IncomingMessage> {
+  const request = url.protocol === "https:" ? httpsRequest : httpRequest;
+  return new Promise((resolve, reject) => {
+    const outgoing = request(url, {
+      method: "GET",
+      headers: options.headers,
+      signal: options.signal,
+      lookup: pinnedLookup(addresses),
+      agent: false,
+    });
+    outgoing.on("response", resolve);
+    outgoing.on("error", reject);
+    outgoing.end();
   });
 }
 
-/** Reads at most `limit` bytes; a larger body is truncated, not rejected. */
-async function readBounded(
-  response: Response,
+/**
+ * Destroys a body without reading it. Node reports the abort as an error
+ * event, and an unhandled error event on a stream takes the process down, so
+ * a listener goes on first: a hostile server must never be able to crash the
+ * worker by sending something we decline to read.
+ */
+function discard(stream: Readable) {
+  stream.on("error", () => {});
+  stream.destroy();
+}
+
+/** "gzip, br" → ["gzip", "br"]: identity removed, in the order applied. */
+export function codingsOf(value: string | null): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((coding) => coding.trim().toLowerCase())
+    .filter((coding) => coding && coding !== "identity");
+}
+
+function toHeaders(raw: IncomingMessage["headers"]) {
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(raw)) {
+    if (value === undefined) continue;
+    for (const item of Array.isArray(value) ? value : [value])
+      try {
+        headers.append(name, item);
+      } catch {
+        // A value Headers will not hold is not one this crawler reads.
+      }
+  }
+  return headers;
+}
+
+function isTimeout(error: unknown) {
+  return (
+    error instanceof Error &&
+    (error.name === "TimeoutError" ||
+      error.name === "AbortError" ||
+      (error as { code?: string }).code === "UND_ERR_ABORTED")
+  );
+}
+
+/**
+ * Decodes the codings in reverse order of application and keeps at most
+ * `limit` decoded bytes; a larger body is truncated, not rejected. The cap is
+ * on the output, so a small gzip bomb stops at the limit as well.
+ */
+async function readDecoded(
+  body: Readable,
+  codings: string[],
   limit: number,
 ): Promise<{ text: string; bytes: number }> {
-  const dispatcher = pending.get(response);
-  pending.delete(response);
-  try {
-    if (!response.body) return { text: "", bytes: 0 };
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let length = 0;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const room = limit - length;
-      chunks.push(value.byteLength > room ? value.slice(0, room) : value);
-      length += Math.min(value.byteLength, room);
-      if (length >= limit) {
-        await reader.cancel().catch(() => {});
-        break;
-      }
-    }
-    const bytes = new Uint8Array(length);
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    return { text: new TextDecoder().decode(bytes), bytes: length };
-  } finally {
-    await dispatcher?.close().catch(() => {});
+  let stream: Readable = body;
+  const stages: Readable[] = [body];
+  for (const coding of [...codings].reverse()) {
+    const decoder = coding === "deflate" ? createInflate() : createGunzip();
+    const source = stream;
+    source.on("error", (error) => decoder.destroy(error));
+    stream = source.pipe(decoder);
+    stages.push(decoder);
   }
+  const chunks: Buffer[] = [];
+  let length = 0;
+  try {
+    for await (const chunk of stream) {
+      const buffer = chunk as Buffer;
+      const room = limit - length;
+      chunks.push(buffer.byteLength > room ? buffer.subarray(0, room) : buffer);
+      length += Math.min(buffer.byteLength, room);
+      if (length >= limit) break;
+    }
+  } catch (error) {
+    if (isTimeout(error)) throw error;
+    // A body cut short mid-stream keeps the part that did arrive; a body that
+    // never decoded at all is reported, not guessed at.
+    if (!length)
+      throw new Error(
+        `The response could not be decoded (${error instanceof Error ? error.message : String(error)}).`,
+      );
+  } finally {
+    for (const stage of stages) discard(stage);
+  }
+  const bytes = Buffer.concat(chunks, length);
+  return { text: new TextDecoder().decode(bytes), bytes: length };
 }
 
 export async function validatePublicUrl(

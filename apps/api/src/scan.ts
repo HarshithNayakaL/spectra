@@ -7,7 +7,7 @@ import {
   type Scan,
 } from "@spectra/schemas";
 import { isAllowed, parseRobots } from "@spectra/evaluation";
-import { fetchPublic, type Fetched } from "./net";
+import { EncodingRefusedError, fetchPublic, type Fetched } from "./net";
 
 const MAX_PAGES = 12;
 const CONCURRENCY = 4;
@@ -236,6 +236,15 @@ export async function probeBots(origin: URL): Promise<BotProbe[]> {
               : "",
         };
       } catch (error) {
+        // It answered; only the body was refused, so the status still says
+        // whether this crawler was let in.
+        if (error instanceof EncodingRefusedError)
+          return {
+            agent: name,
+            status: error.status,
+            blocked: error.status >= 400,
+            note: `answered ${error.status} in ${error.encoding} encoding, which SPECTRA does not decode`,
+          };
         const text = messageOf(error);
         // A slow server is not a firewall. Only a refusal counts as a block.
         const timedOut = /timed out|timeout|aborted/i.test(text);
