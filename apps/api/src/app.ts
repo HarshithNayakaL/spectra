@@ -76,6 +76,10 @@ app.get("/api/health", (c) =>
     // A boolean rather than the version string: enough to verify a patch
     // landed, without publishing the exact build to anyone who asks.
     runtimePatched: runtimePatched(),
+    // The release line only, so a runtime change can be confirmed.
+    nodeLine: process.versions.bun
+      ? null
+      : Number(process.versions.node.split(".")[0]),
     runningAudits: running,
     runningJourneys: walking,
   }),
