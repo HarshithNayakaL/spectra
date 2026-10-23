@@ -111,6 +111,19 @@ describe("the public check itself", () => {
     await expect(validatePublicUrl(`${base}/`)).rejects.toThrow(/non-public/);
   });
 
+  // CVE-2026-105483 and -106069/-106072: TLS hostname checks were bypassed by
+  // fullwidth digits and loose IPv4 forms. The URL parser canonicalises every
+  // such host before it reaches TLS, and each of these is private anyway.
+  it.each([
+    "https://１２７.０.０.１/",
+    "https://0x7f.1/",
+    "https://2130706433/",
+    "https://127.1/",
+  ])("canonicalises and refuses %s", async (value) => {
+    expect(new URL(value).hostname).toBe("127.0.0.1");
+    await expect(validatePublicUrl(value)).rejects.toThrow(/non-public/);
+  });
+
   // CVE-2026-105482: dns.resolve truncates names at a NUL. The URL parser
   // refuses such a host before any lookup, and the lookup used is getaddrinfo.
   it("refuses a hostname with a NUL in it", async () => {
