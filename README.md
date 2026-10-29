@@ -4,6 +4,8 @@
 
 SPECTRA is an adaptive AI-search perception and machine-understanding platform. It answers a narrower and more useful question than a conventional SEO audit: **what does an AI system actually understand about this website, what evidence supports that understanding, and where does important information disappear?**
 
+**Case study:** [harshith-nayaka-l-portfolio.vercel.app/work/spectra](https://harshith-nayaka-l-portfolio.vercel.app/work/spectra): the problem, the architecture and the engineering decisions behind SPECTRA.
+
 ## Why it exists
 
 Search visibility is an information pipeline, not a single page score. A fact can be present in source HTML yet vanish during crawling, extraction, semantic representation, model interpretation, or retrieval. Existing SEO tools mainly inspect technical health and rankings. Generic GEO checkers often produce opaque model-authored scores. SPECTRA instead keeps evidence through each stage and calculates deterministic, explainable measurements.
